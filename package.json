@@ -19,16 +19,19 @@
     "db:migrate": "npm -w backend run db:migrate",
     "db:seed": "npm -w backend run db:seed",
     "neo4j:init": "npm -w backend run neo4j:init",
+    "check:env": "node infra/scripts/check-env.mjs",
+    "start": "node infra/scripts/check-env.mjs && npm run dev",
     "prepare": "husky"
   },
   "devDependencies": {
-    "concurrently": "8.2.2",
-    "eslint": "8.57.0",
-    "@typescript-eslint/parser": "7.18.0",
     "@typescript-eslint/eslint-plugin": "7.18.0",
-    "prettier": "3.3.3",
+    "@typescript-eslint/parser": "7.18.0",
+    "concurrently": "8.2.2",
+    "dotenv": "^17.4.2",
+    "eslint": "8.57.0",
     "husky": "9.1.6",
     "lint-staged": "15.2.10",
+    "prettier": "3.3.3",
     "typescript": "5.5.4"
   },
   "lint-staged": {
