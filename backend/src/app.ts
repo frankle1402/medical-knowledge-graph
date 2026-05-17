@@ -24,8 +24,8 @@ export function createApp(): Express {
     app.use(pinoHttp({ logger }));
   }
 
-  app.get('/healthz', (_req, res) => {
-    res.json({ ok: true, env: env.NODE_ENV });
+  app.get('/api/health', (_req, res) => {
+    res.json({ ok: true, version: process.env.npm_package_version ?? '0.1.0' });
   });
 
   // ===== MOUNT-POINTS (Agent-A owned) =====

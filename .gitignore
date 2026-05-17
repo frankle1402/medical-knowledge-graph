@@ -12,3 +12,5 @@ coverage
 e2e/test-results
 e2e/playwright-report
 backend/prisma/migrations/dev.db*
+.claude/settings.local.json
+.claude/worktrees/

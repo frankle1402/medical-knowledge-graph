@@ -72,10 +72,11 @@ describe('system routes', () => {
     expect(r.status).toBe(403);
   });
 
-  it('GET /healthz returns ok', async () => {
-    const r = await request(app).get('/healthz');
+  it('GET /api/health returns ok', async () => {
+    const r = await request(app).get('/api/health');
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);
+    expect(typeof r.body.version).toBe('string');
   });
 
   it('GET /api/docs serves swagger UI', async () => {
