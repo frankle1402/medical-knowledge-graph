@@ -14,6 +14,7 @@ import { GraphCanvas } from '../components/GraphEditor/GraphCanvas';
 import { NodeForm } from '../components/GraphEditor/NodeForm';
 import { RelationForm } from '../components/GraphEditor/RelationForm';
 import { NodePanel } from '../components/NodePanel';
+import { ReviewPanel } from '../components/ReviewPanel';
 import { Button, Modal } from '../components/ui';
 import { useGraphStore } from '../stores';
 
@@ -311,7 +312,7 @@ export function GraphEditorPage() {
         }}
       />
 
-      <ReviewPanelPlaceholder
+      <ReviewPanel
         open={reviewOpen}
         jobId={activeJobId}
         onClose={() => setReviewOpen(false)}
@@ -554,34 +555,6 @@ const selectStyle: React.CSSProperties = {
 /**
  * Placeholder for ReviewPanel.
  *
- * ROUTE-POINTS:agent-e — replace this with `<ReviewPanel>` from
- * `frontend/src/components/ReviewPanel/ReviewPanel.tsx` (Agent-E owns).
- * Contract: must accept `{ open, jobId, onClose }` and call POST
- * /api/ai/jobs/:jobId/{approve,approve-all,reject-all}.
+ * ROUTE-POINTS:agent-e — replaced; the real `<ReviewPanel>` lives at
+ * `frontend/src/components/ReviewPanel/ReviewPanel.tsx` and is imported above.
  */
-function ReviewPanelPlaceholder({
-  open,
-  jobId,
-  onClose,
-}: {
-  open: boolean;
-  jobId: string | null;
-  onClose: () => void;
-}) {
-  return (
-    <Modal open={open} title="审核 AI 生成结果" onClose={onClose} testId="review-panel-placeholder">
-      <p style={{ fontSize: 13, color: '#374151' }}>
-        Job: <code>{jobId ?? '-'}</code>
-      </p>
-      <p style={{ fontSize: 12, color: '#6b7280' }}>
-        新生成的候选节点 / 关系已显示在画布上（虚线描边）。完整审核 UI 由 Agent-E 在 ReviewPanel
-        中实现，将提供「全部通过 / 选择性通过 / 全部驳回」三个操作。
-      </p>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-        <Button variant="secondary" onClick={onClose}>
-          关闭
-        </Button>
-      </div>
-    </Modal>
-  );
-}

@@ -41,10 +41,9 @@ export function MonacoCodeEditor({
         onChange={handleChange}
         language={language}
         height={height}
-        // Forward to the test mock; the real Editor ignores unknown props.
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-expect-error custom prop for test mock
-        aria-label={ariaLabel}
+        // The real Editor doesn't have a top-level aria-label prop, but the
+        // test mock reads it. The runtime cost of sending an unknown prop is nil.
+        {...({ 'aria-label': ariaLabel } as { 'aria-label'?: string })}
         options={{
           readOnly,
           minimap: { enabled: false },
