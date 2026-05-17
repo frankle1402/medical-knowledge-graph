@@ -1,0 +1,37 @@
+{
+  "name": "medical-knowledge-graph",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["shared", "backend", "frontend", "e2e"],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm -w backend run dev\" \"npm -w frontend run dev\"",
+    "dev:backend": "npm -w backend run dev",
+    "dev:frontend": "npm -w frontend run dev",
+    "build": "npm -w shared run build && npm -w backend run build && npm -w frontend run build",
+    "lint": "eslint . --ext .ts,.tsx",
+    "typecheck": "tsc -b",
+    "test": "npm -w backend test && npm -w frontend test && npm -w @mkg/shared test",
+    "db:migrate": "npm -w backend run db:migrate",
+    "db:seed": "npm -w backend run db:seed",
+    "neo4j:init": "npm -w backend run neo4j:init",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "concurrently": "8.2.2",
+    "eslint": "8.57.0",
+    "@typescript-eslint/parser": "7.18.0",
+    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "prettier": "3.3.3",
+    "husky": "9.1.6",
+    "lint-staged": "15.2.10",
+    "typescript": "5.5.4"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": ["eslint --fix", "prettier --write"],
+    "*.{json,md,yml}": ["prettier --write"]
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
