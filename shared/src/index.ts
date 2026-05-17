@@ -6,3 +6,4 @@ export * from './schemas/ai';
 export * from './schemas/user';
 export * from './schemas/auth';
 export * from './schemas/template';
+export * from './utils/id';
