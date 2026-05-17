@@ -2,7 +2,12 @@
   "name": "medical-knowledge-graph",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["shared", "backend", "frontend", "e2e"],
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend",
+    "e2e"
+  ],
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,green \"npm -w backend run dev\" \"npm -w frontend run dev\"",
     "dev:backend": "npm -w backend run dev",
@@ -27,8 +32,13 @@
     "typescript": "5.5.4"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,jsx}": ["eslint --fix", "prettier --write"],
-    "*.{json,md,yml}": ["prettier --write"]
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml}": [
+      "prettier --write"
+    ]
   },
   "engines": {
     "node": ">=20.0.0",
