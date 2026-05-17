@@ -6,7 +6,8 @@ import { useAuthStore } from './stores';
 import { LoginPage } from './pages/LoginPage';
 import { GraphListPage } from './pages/GraphListPage';
 import { GraphEditorPage } from './pages/GraphEditorPage';
-import { RequireAuth } from './components/auth';
+import { UsersPage } from './pages/UsersPage';
+import { RequireAuth, RequireRole } from './components/auth';
 
 /**
  * App entry. Owned by Agent-D.
@@ -60,6 +61,16 @@ export function App() {
             }
           />
           {/* ROUTE-POINTS:agent-e — register Templates / Users / AILogs / Settings here */}
+          <Route
+            path="/users"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['admin']}>
+                  <UsersPage />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
           <Route path="/" element={<Navigate to="/graphs" replace />} />
           <Route path="*" element={<Navigate to="/graphs" replace />} />
         </Routes>
