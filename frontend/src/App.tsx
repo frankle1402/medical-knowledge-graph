@@ -7,6 +7,7 @@ import { LoginPage } from './pages/LoginPage';
 import { GraphListPage } from './pages/GraphListPage';
 import { GraphEditorPage } from './pages/GraphEditorPage';
 import { UsersPage } from './pages/UsersPage';
+import { TemplatesPage } from './pages/TemplatesPage';
 import { RequireAuth, RequireRole } from './components/auth';
 
 /**
@@ -67,6 +68,16 @@ export function App() {
               <RequireAuth>
                 <RequireRole roles={['admin']}>
                   <UsersPage />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/templates"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['admin']}>
+                  <TemplatesPage />
                 </RequireRole>
               </RequireAuth>
             }
