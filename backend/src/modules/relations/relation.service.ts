@@ -132,8 +132,7 @@ const RelationServiceCrud = {
     relation_id: string,
     patch: RelationUpdateInput,
   ): Promise<RelationRecord | null> {
-    const rid = Number(relation_id);
-    if (!Number.isFinite(rid)) {
+    if (!/^\d+$/.test(relation_id)) {
       throw Object.assign(new Error('invalid relation_id'), { statusCode: 400 });
     }
     const cleaned = compact(patch as Record<string, unknown>);
@@ -145,9 +144,9 @@ const RelationServiceCrud = {
         sid: string;
         tid: string;
       }>(
-        `MATCH (a:Node)-[r]->(b:Node) WHERE id(r) = $rid
+        `MATCH (a:Node)-[r]->(b:Node) WHERE id(r) = toInteger($rid)
          RETURN r { .* } AS r, type(r) AS type, a.node_id AS sid, b.node_id AS tid`,
-        { rid },
+        { rid: relation_id },
       );
       if (!rows[0]) return null;
       return {
@@ -164,10 +163,10 @@ const RelationServiceCrud = {
       sid: string;
       tid: string;
     }>(
-      `MATCH (a:Node)-[r]->(b:Node) WHERE id(r) = $rid
+      `MATCH (a:Node)-[r]->(b:Node) WHERE id(r) = toInteger($rid)
        SET r += $patch, r.updated_at = datetime()
        RETURN r { .* } AS r, type(r) AS type, a.node_id AS sid, b.node_id AS tid`,
-      { rid, patch: cleaned },
+      { rid: relation_id, patch: cleaned },
     );
     if (!rows[0]) return null;
     return {
@@ -180,16 +179,15 @@ const RelationServiceCrud = {
   },
 
   async remove(relation_id: string): Promise<boolean> {
-    const rid = Number(relation_id);
-    if (!Number.isFinite(rid)) {
+    if (!/^\d+$/.test(relation_id)) {
       throw Object.assign(new Error('invalid relation_id'), { statusCode: 400 });
     }
     const rows = await runQuery<{ deleted: number }>(
-      `MATCH ()-[r]->() WHERE id(r) = $rid
+      `MATCH ()-[r]->() WHERE id(r) = toInteger($rid)
        WITH r, 1 AS marker
        DELETE r
        RETURN count(marker) AS deleted`,
-      { rid },
+      { rid: relation_id },
     );
     return Number(rows[0]?.deleted ?? 0) > 0;
   },

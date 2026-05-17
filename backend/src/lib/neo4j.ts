@@ -85,11 +85,32 @@ export async function runQuery<T = Record<string, unknown>>(
   };
   const session: Session = getDriver().session(sessionConfig);
   try {
-    const res = await session.run(cypher, params);
+    const res = await session.run(cypher, coerceIntParams(params));
     return res.records.map((r) => toPlain(r.toObject()) as T);
   } finally {
     await session.close();
   }
+}
+
+/**
+ * Cypher 5 distinguishes INTEGER and FLOAT. JS `number` always serializes as
+ * FLOAT, which breaks `SKIP $n`, `LIMIT $n`, and `id(r) = $rid`. Wrap any
+ * finite integer-valued number in `neo4j.int()` so the driver sends INTEGER.
+ * Strings, decimals, and nested objects are passed through (graph properties
+ * may legitimately be floats — only top-level integer ints are coerced).
+ */
+function coerceIntParams(
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (typeof v === 'number' && Number.isInteger(v)) {
+      out[k] = neo4j.int(v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 /**
