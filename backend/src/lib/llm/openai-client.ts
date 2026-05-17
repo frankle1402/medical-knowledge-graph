@@ -6,7 +6,7 @@
  * typed errors so callers can decide whether to retry.
  */
 
-import { env } from '../../config/env.js';
+import { getLlmConfig } from '../../modules/system/llm-config.service.js';
 import { LLMAuthError, LLMTransientError, LLMError } from './errors.js';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
@@ -63,10 +63,11 @@ function buildMessages(opts: ChatCompletionOptions): ChatMessage[] {
  * retry helper for that. Throws typed LLM errors.
  */
 export async function chatCompletion(opts: ChatCompletionOptions): Promise<string> {
-  const baseUrl = opts.baseUrl ?? env.LLM_BASE_URL;
-  const apiKey = opts.apiKey ?? env.LLM_API_KEY;
-  const model = opts.model ?? env.LLM_MODEL;
-  const timeoutMs = opts.timeoutMs ?? env.LLM_TIMEOUT_MS;
+  const cfg = await getLlmConfig();
+  const baseUrl = opts.baseUrl ?? cfg.base_url;
+  const apiKey = opts.apiKey ?? cfg.api_key;
+  const model = opts.model ?? cfg.model;
+  const timeoutMs = opts.timeoutMs ?? cfg.timeout_ms;
 
   const body: Record<string, unknown> = {
     model,
@@ -122,21 +123,46 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<strin
       throw new LLMAuthError(`LLM auth failed (${res.status}): ${detail}`, res.status);
     }
     if (TRANSIENT_STATUS.has(res.status)) {
-      throw new LLMTransientError(
-        `LLM transient failure ${res.status}: ${detail}`,
-        res.status,
-      );
+      throw new LLMTransientError(`LLM transient failure ${res.status}: ${detail}`, res.status);
     }
     throw new LLMError(`LLM call failed ${res.status}: ${detail}`);
   }
 
+  // Read body as text first so we can give a useful diagnostic when the
+  // upstream returns HTML (typical when base_url is wrong or a proxy gateway
+  // serves a login page on auth failure). Older test mocks may only expose
+  // .json(), so fall back to that path when .text() / headers aren't there.
+  const contentType = res.headers?.get?.('content-type') ?? '';
+  let bodyText: string | null = null;
+  if (typeof res.text === 'function') {
+    try {
+      bodyText = await res.text();
+    } catch (err) {
+      throw new LLMTransientError('LLM response body could not be read', undefined, {
+        cause: err,
+      });
+    }
+
+    const looksLikeHtml = /^\s*<(!doctype|html|head|body)/i.test(bodyText);
+    if (looksLikeHtml || contentType.includes('text/html')) {
+      throw new LLMError(
+        `LLM 接口返回了 HTML 而非 JSON，通常是 base_url 配错（漏了 /v1）或代理网关返回登录页。base_url=${baseUrl}, content-type=${contentType || 'unknown'}, body[0..120]=${bodyText.slice(0, 120)}`,
+      );
+    }
+  }
+
   let data: ChatCompletionResponse;
   try {
-    data = (await res.json()) as ChatCompletionResponse;
+    data =
+      bodyText !== null
+        ? (JSON.parse(bodyText) as ChatCompletionResponse)
+        : ((await res.json()) as ChatCompletionResponse);
   } catch (err) {
-    throw new LLMTransientError('LLM response was not valid JSON', undefined, {
-      cause: err,
-    });
+    const sample = bodyText ? bodyText.slice(0, 120) : '(unreadable)';
+    throw new LLMError(
+      `LLM 接口返回了非 JSON 内容。base_url=${baseUrl}, content-type=${contentType || 'unknown'}, body[0..120]=${sample}`,
+      { cause: err },
+    );
   }
 
   const content = data.choices?.[0]?.message?.content;

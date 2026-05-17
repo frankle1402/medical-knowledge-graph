@@ -66,3 +66,18 @@ model AiGenerationLog {
   @@index([created_at])
   @@map("ai_generation_logs")
 }
+
+// Runtime-mutable LLM configuration. Singleton row keyed by id="default".
+// Admin UI writes here; backend reads via getLlmConfig() (cached) so changes
+// take effect without restart. Falls back to env defaults when unset.
+model LlmConfig {
+  id         String   @id @default("default")
+  base_url   String?
+  api_key    String?
+  model      String?
+  timeout_ms Int?
+  updated_at DateTime @updatedAt
+  updated_by String?
+
+  @@map("llm_config")
+}
