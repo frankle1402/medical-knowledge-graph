@@ -15,7 +15,7 @@ import { NodeForm } from '../components/GraphEditor/NodeForm';
 import { RelationForm } from '../components/GraphEditor/RelationForm';
 import { NodePanel } from '../components/NodePanel';
 import { ReviewPanel } from '../components/ReviewPanel';
-import { Button, Modal } from '../components/ui';
+import { Button, Modal, Toaster, toast } from '../components/ui';
 import { useGraphStore } from '../stores';
 
 export function GraphEditorPage() {
@@ -175,6 +175,7 @@ export function GraphEditorPage() {
         gridTemplateAreas: '"header header header" "left main right"',
       }}
     >
+      <Toaster richColors position="top-right" />
       <header
         style={{
           gridArea: 'header',
@@ -302,21 +303,24 @@ export function GraphEditorPage() {
         onClose={() => setGenerateOpen(false)}
         onJobComplete={(job) => {
           setGenerateOpen(false);
+          if (job.status === 'failed') {
+            toast.error(`AI 生成失败：${job.error ?? '未知错误'}`, { duration: 12_000 });
+            return;
+          }
           // Append candidate nodes/relations into store; ReviewPanel (Agent-E) will manage approval.
           if (job.output) {
             for (const n of job.output.nodes ?? []) upsertNode(n);
             for (const r of job.output.relations ?? []) upsertRelation(r);
+          }
+          if (job.status === 'partial') {
+            toast.warning(`AI 生成部分成功：${job.error ?? ''}`, { duration: 8_000 });
           }
           setActiveJobId(job.job_id);
           setReviewOpen(true);
         }}
       />
 
-      <ReviewPanel
-        open={reviewOpen}
-        jobId={activeJobId}
-        onClose={() => setReviewOpen(false)}
-      />
+      <ReviewPanel open={reviewOpen} jobId={activeJobId} onClose={() => setReviewOpen(false)} />
     </div>
   );
 }
@@ -334,6 +338,7 @@ function AIGenerateDialog({ open, graphId, onClose, onJobComplete }: AIGenerateD
   const [variables, setVariables] = useState<Record<string, string | number | boolean>>({});
   const [phase, setPhase] = useState<'idle' | 'submitting' | 'polling' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -368,9 +373,11 @@ function AIGenerateDialog({ open, graphId, onClose, onJobComplete }: AIGenerateD
       };
       const { job_id } = await aiApi.generate(req);
       setPhase('polling');
-      const job = await pollJob(job_id);
+      setElapsedMs(0);
+      const job = await pollJob(job_id, { onTick: (ms) => setElapsedMs(ms) });
       onJobComplete(job);
       setPhase('idle');
+      setElapsedMs(0);
       setVariables({});
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
@@ -419,7 +426,8 @@ function AIGenerateDialog({ open, graphId, onClose, onJobComplete }: AIGenerateD
           ) : null}
           {phase === 'polling' ? (
             <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 8 }} role="status">
-              生成中，请稍候…
+              生成中，请稍候… 已等待 {Math.floor(elapsedMs / 1000)}s（GPT-4o 处理章节图谱通常
+              60–180s，最长 5 分钟）
             </div>
           ) : null}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -532,15 +540,26 @@ function VariableField({
   }
 }
 
-async function pollJob(jobId: string, maxAttempts = 60, intervalMs = 1000): Promise<AIJob> {
-  for (let i = 0; i < maxAttempts; i++) {
+async function pollJob(
+  jobId: string,
+  options: { totalMs?: number; onTick?: (elapsedMs: number) => void } = {},
+): Promise<AIJob> {
+  // GPT-4o on a full chapter (≈10–20 nodes + 30+ relations) often runs
+  // 60–180s; allow 5 minutes total. Poll every 1s for the first 30s
+  // (responsive on cache-hits / errors), then 3s thereafter (less load).
+  const totalMs = options.totalMs ?? 5 * 60 * 1000;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < totalMs) {
     const job = await aiApi.getJob(jobId);
     if (job.status === 'success' || job.status === 'failed' || job.status === 'partial') {
       return job;
     }
-    await new Promise((r) => setTimeout(r, intervalMs));
+    const elapsed = Date.now() - startedAt;
+    options.onTick?.(elapsed);
+    const interval = elapsed < 30_000 ? 1000 : 3000;
+    await new Promise((r) => setTimeout(r, interval));
   }
-  throw new Error('生成超时');
+  throw new Error('生成超时（已等待 5 分钟仍未返回，请检查后端日志或 LLM 配置）');
 }
 
 const selectStyle: React.CSSProperties = {
