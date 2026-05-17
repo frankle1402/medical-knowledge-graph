@@ -12,7 +12,7 @@
     "build": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "openapi:gen": "tsx src/openapi/build.ts > dist/openapi.yaml"
+    "openapi:gen": "tsx src/openapi/build.ts > ../backend/openapi.yaml"
   },
   "dependencies": {
     "zod": "3.23.8",
