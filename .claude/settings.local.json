@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(writing-plans)",
+      "Skill(writing-plans:*)",
+      "Bash(awk 'END{print NR}' \"c:/ClaudeCode/20260517 TextBookRagAndKnowledgeGraph/docs/plans/2026-05-17-agent-d-frontend-editor.md\")"
+    ]
+  }
+}
