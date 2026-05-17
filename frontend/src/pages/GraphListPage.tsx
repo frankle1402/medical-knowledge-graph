@@ -68,6 +68,19 @@ export function GraphListPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {user?.role === 'admin' ? (
+            <>
+              <Button variant="ghost" onClick={() => navigate('/templates')}>
+                提示词模板
+              </Button>
+              <Button variant="ghost" onClick={() => navigate('/users')}>
+                用户管理
+              </Button>
+              <Button variant="ghost" onClick={() => navigate('/settings')}>
+                系统设置
+              </Button>
+            </>
+          ) : null}
           <Button onClick={() => setCreateOpen(true)}>新建图谱</Button>
           <Button variant="secondary" onClick={handleLogout}>
             退出
