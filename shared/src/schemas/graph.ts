@@ -24,3 +24,12 @@ export const GraphCreateInput = Graph.pick({
   description: true,
 });
 export type GraphCreateInput = z.infer<typeof GraphCreateInput>;
+
+// 更新图谱元数据：所有字段均可选；不允许改 created_by / graph_id 等不可变字段
+export const GraphUpdateInput = GraphCreateInput.partial().extend({
+  status: z.enum(['active', 'archived']).optional(),
+  chapter_name: z.string().optional(),
+  textbook_id: z.string().optional(),
+  cover_url: z.string().url().optional(),
+});
+export type GraphUpdateInput = z.infer<typeof GraphUpdateInput>;

@@ -10,7 +10,7 @@ import {
   NodeUpdateInput,
 } from '../schemas/node';
 import { Relation, RelationCreateInput } from '../schemas/relation';
-import { Graph, GraphCreateInput } from '../schemas/graph';
+import { Graph, GraphCreateInput, GraphUpdateInput } from '../schemas/graph';
 import {
   AIGenerateRequest,
   AIJob,
@@ -219,6 +219,17 @@ registry.registerPath({
       },
     },
   },
+});
+registry.registerPath({
+  method: 'put',
+  path: '/api/graphs/{id}',
+  tags: ['graphs'],
+  security: [{ [bearer.name]: [] }],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: { content: { 'application/json': { schema: GraphUpdateInput } } },
+  },
+  responses: { 200: { description: 'OK', content: { 'application/json': { schema: Graph } } } },
 });
 registry.registerPath({
   method: 'delete',
