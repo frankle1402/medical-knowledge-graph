@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  username      String   @unique @db.VarChar(50)
+  email         String   @unique @db.VarChar(100)
+  password_hash String   @db.VarChar(255)
+  role          String   @default("operator") @db.VarChar(20)
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now()) @db.Timestamptz
+
+  templates PromptTemplate[]
+  ai_logs   AiGenerationLog[]
+
+  @@index([role])
+  @@map("users")
+}
+
+model PromptTemplate {
+  id                   String    @id @default(uuid()) @db.Uuid
+  name                 String    @db.VarChar(100)
+  description          String?   @db.Text
+  variables            Json      @default("[]")
+  system_prompt        String    @db.Text
+  user_prompt_template String    @db.Text
+  output_schema        Json?
+  is_active            Boolean   @default(true)
+  deleted_at           DateTime? @db.Timestamptz
+  created_by           String?   @db.Uuid
+  created_at           DateTime  @default(now()) @db.Timestamptz
+  updated_at           DateTime  @updatedAt @db.Timestamptz
+
+  creator User?             @relation(fields: [created_by], references: [id], onDelete: SetNull)
+  ai_logs AiGenerationLog[]
+
+  @@index([is_active])
+  @@index([deleted_at])
+  @@map("prompt_templates")
+}
+
+model AiGenerationLog {
+  id                String   @id @default(uuid()) @db.Uuid
+  graph_id          String?  @db.VarChar(50)
+  template_id       String?  @db.Uuid
+  user_id           String?  @db.Uuid
+  prompt_used       String?  @db.Text
+  llm_response      String?  @db.Text
+  nodes_created     Int      @default(0)
+  relations_created Int      @default(0)
+  status            String   @db.VarChar(20)
+  error_msg         String?  @db.Text
+  created_at        DateTime @default(now()) @db.Timestamptz
+
+  template PromptTemplate? @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  user     User?           @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([graph_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("ai_generation_logs")
+}
