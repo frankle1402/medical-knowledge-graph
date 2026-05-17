@@ -1,9 +1,12 @@
 /**
- * Public AI module surface (front-half).
+ * Public AI module surface.
  *
- * The router (Task 6) is intentionally NOT exported yet — Agent-C back-half
- * will mount /api/ai once Agent-B's NodeService/RelationService land.
+ * Front-half (Tasks 1-5) shipped the orchestrator + LLM/template/mapper
+ * primitives. Back-half (Tasks 6-11) ships the HTTP router (`aiRouter`)
+ * and is mounted by `app.ts` at `/api/ai`.
  */
+export { aiRouter } from './ai.routes.js';
+
 export {
   AIJobOrchestrator,
   type AIJobOrchestratorDeps,

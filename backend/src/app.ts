@@ -18,6 +18,7 @@ import {
   relationGraphRouter,
   relationRouter,
 } from './modules/relations/relation.routes.js';
+import { aiRouter } from './modules/ai/index.js';
 
 export function createApp(): Express {
   const app = express();
@@ -58,6 +59,7 @@ export function createApp(): Express {
 
   // ===== MOUNT-POINTS (Agent-C reserved) =====
   // Agent-C will add: app.use('/api/ai', aiRouter)
+  app.use('/api/ai', aiRouter);
 
   // Swagger UI (consumes openapi.yaml produced by @mkg/shared)
   mountSwagger(app);

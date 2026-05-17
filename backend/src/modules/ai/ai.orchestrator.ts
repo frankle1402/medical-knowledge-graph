@@ -107,13 +107,16 @@ export class AIJobOrchestrator {
   }
 
   /**
-   * End-to-end AI generation:
+   * End-to-end AI generation (synchronous, blocking).
    *
    *  1. Insert ai_generation_logs row (status=running).
    *  2. Validate + render prompt.
    *  3. Call LLM with retry → parse + zod validate → map.
    *  4. Persist candidates via NodeService.bulkCreate / RelationService.bulkCreate.
    *  5. Update ai_generation_logs row (status=success | failed).
+   *
+   * Tests + back-half code use this. The HTTP route prefers `start()` (below)
+   * which returns the jobId immediately and runs the rest in the background.
    */
   async generate(input: GenerateInput): Promise<GenerateResult> {
     const log = await this.prisma.aiGenerationLog.create({
@@ -127,6 +130,48 @@ export class AIJobOrchestrator {
       },
     });
 
+    return this.runWithLog(log.id, input);
+  }
+
+  /**
+   * Fire-and-forget entry point used by `POST /api/ai/generate`.
+   *
+   * Synchronously creates the ai_generation_logs row (status=running) and
+   * returns the new jobId. The actual LLM call + persistence runs on the
+   * returned `done` promise; callers may either await it (tests) or attach
+   * `.catch(...)` to swallow errors (HTTP route).
+   *
+   * On the LLM side, errors that escape `runWithLog` are already persisted
+   * as status=failed before the promise rejects, so the caller can safely
+   * ignore the rejection.
+   */
+  async start(
+    input: GenerateInput,
+  ): Promise<{ jobId: string; done: Promise<GenerateResult> }> {
+    const log = await this.prisma.aiGenerationLog.create({
+      data: {
+        graph_id: input.graphId,
+        template_id: input.template.id,
+        user_id: input.userId,
+        status: 'running',
+        prompt_used: '',
+        llm_response: '',
+      },
+    });
+
+    const done = this.runWithLog(log.id, input);
+    return { jobId: log.id, done };
+  }
+
+  /**
+   * Shared inner pipeline: render prompt → LLM → map → persist candidates →
+   * update the log row. Throws on any failure; the log row is updated to
+   * status=failed before the throw propagates.
+   */
+  private async runWithLog(
+    logId: string,
+    input: GenerateInput,
+  ): Promise<GenerateResult> {
     let prompt = '';
     let raw = '';
 
@@ -154,7 +199,7 @@ export class AIJobOrchestrator {
       const defaults = {
         status: 'candidate' as const,
         source: 'ai_generated' as const,
-        ai_job_id: log.id,
+        ai_job_id: logId,
       };
 
       const createdNodes = await this.nodeService.bulkCreate(
@@ -169,7 +214,7 @@ export class AIJobOrchestrator {
       );
 
       await this.prisma.aiGenerationLog.update({
-        where: { id: log.id },
+        where: { id: logId },
         data: {
           status: 'success',
           prompt_used: prompt,
@@ -180,7 +225,7 @@ export class AIJobOrchestrator {
       });
 
       return {
-        jobId: log.id,
+        jobId: logId,
         status: 'success',
         nodesCreated: createdNodes.length,
         relationsCreated: createdRelations.length,
@@ -191,7 +236,7 @@ export class AIJobOrchestrator {
       const message = err instanceof Error ? err.message : String(err);
       try {
         await this.prisma.aiGenerationLog.update({
-          where: { id: log.id },
+          where: { id: logId },
           data: {
             status: 'failed',
             prompt_used: prompt,
