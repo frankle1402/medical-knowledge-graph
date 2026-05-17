@@ -12,6 +12,12 @@ import { authRouter } from './modules/auth/auth.routes.js';
 import { usersRouter } from './modules/users/users.routes.js';
 import { templatesRouter } from './modules/templates/templates.routes.js';
 import { systemRouter } from './modules/system/system.routes.js';
+import { graphRouter } from './modules/graphs/graph.routes.js';
+import { nodeGraphRouter, nodeRouter } from './modules/nodes/node.routes.js';
+import {
+  relationGraphRouter,
+  relationRouter,
+} from './modules/relations/relation.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -40,6 +46,15 @@ export function createApp(): Express {
   // Agent-B will add: app.use('/api/graphs', graphsRouter)
   //                   app.use('/api/nodes', nodesRouter)
   //                   app.use('/api/relations', relationsRouter)
+  //
+  // Two-router-per-resource pattern: the *graph* routers handle paths nested
+  // under /api/graphs/:id/{nodes,relations}; the standalone routers handle
+  // /api/nodes/:nodeId and /api/relations/:relationId.
+  app.use('/api/graphs', graphRouter);
+  app.use('/api/graphs', nodeGraphRouter);
+  app.use('/api/graphs', relationGraphRouter);
+  app.use('/api/nodes', nodeRouter);
+  app.use('/api/relations', relationRouter);
 
   // ===== MOUNT-POINTS (Agent-C reserved) =====
   // Agent-C will add: app.use('/api/ai', aiRouter)
