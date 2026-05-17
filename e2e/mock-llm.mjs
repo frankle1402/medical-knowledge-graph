@@ -36,6 +36,8 @@ const FIXED_GRAPH = {
       name: '排气',
       description: '排尽输液管中空气',
       confidence: 0.99,
+      step_order: 1,
+      phase: '准备阶段',
     },
     {
       node_id: 'TM_1',
@@ -43,6 +45,8 @@ const FIXED_GRAPH = {
       name: '肝素帽',
       description: '一次性密闭装置',
       confidence: 0.97,
+      standard_term: '肝素帽',
+      aliases: [],
     },
   ],
   relations: [
