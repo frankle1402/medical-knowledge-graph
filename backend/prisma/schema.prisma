@@ -112,7 +112,7 @@ model Node {
   confidence     Float    @default(1.0)
   tags           Json     @default("[]")
   ai_job_id      String?  @db.VarChar(50)
-  // embedding vector(1536) — 在 _add_pgvector migration 里加
+  embedding      Unsupported("vector(1536)")?
   created_at     DateTime @default(now()) @db.Timestamptz
   updated_at     DateTime @updatedAt @db.Timestamptz
 
