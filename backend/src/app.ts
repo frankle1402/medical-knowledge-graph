@@ -20,6 +20,7 @@ import {
 } from './modules/relations/relation.routes.js';
 import { aiRouter } from './modules/ai/index.js';
 import { learningRoutes } from './modules/learning/learning.routes.js';
+import { searchRouter } from './modules/search/search.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -61,6 +62,12 @@ export function createApp(): Express {
   // ===== MOUNT-POINTS (Agent-C reserved) =====
   // Agent-C will add: app.use('/api/ai', aiRouter)
   app.use('/api/ai', aiRouter);
+
+  // pack-c routes — RAG semantic search.
+  // POST /api/graphs/:graph_id/search lives on its own router so route
+  // ownership stays clear. The upsert hook is wired in server.ts (not here)
+  // so tests calling createApp() don't trigger background OpenAI calls.
+  app.use('/api/graphs', searchRouter);
 
   // pack-d routes
   // Learning routes mount at /api so the router can write the full path

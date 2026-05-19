@@ -15,7 +15,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "neo4j:init": "tsx src/scripts/neo4j-init.ts",
     "smoke:graph": "tsx src/scripts/smoke-graph.ts",
-    "migrate:from-neo4j": "tsx src/scripts/migrate-from-neo4j.ts"
+    "migrate:from-neo4j": "tsx src/scripts/migrate-from-neo4j.ts",
+    "backfill:embeddings": "tsx src/scripts/backfill-embeddings.ts"
   },
   "dependencies": {
     "@mkg/shared": "*",
@@ -28,6 +29,7 @@
     "helmet": "7.1.0",
     "jsonwebtoken": "9.0.2",
     "neo4j-driver": "5.24.0",
+    "openai": "4.50.0",
     "pino": "9.4.0",
     "pino-http": "10.3.0",
     "swagger-ui-express": "5.0.1",
