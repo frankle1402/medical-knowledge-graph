@@ -81,3 +81,71 @@ model LlmConfig {
 
   @@map("llm_config")
 }
+
+model Graph {
+  graph_id      String   @id @db.VarChar(50)
+  graph_name    String   @db.VarChar(100)
+  graph_type    String   @db.VarChar(40)
+  subject       String?  @db.VarChar(50)
+  course_name   String?  @db.VarChar(100)
+  description   String?  @db.Text
+  status        String   @default("active") @db.VarChar(20)
+  created_by    String?  @db.VarChar(50)
+  created_at    DateTime @default(now()) @db.Timestamptz
+  updated_at    DateTime @updatedAt @db.Timestamptz
+
+  nodes     Node[]
+  relations Relation[]
+
+  @@map("graphs")
+}
+
+model Node {
+  node_id        String   @id @db.VarChar(80)
+  graph_id       String   @db.VarChar(50)
+  node_type      String   @db.VarChar(40)
+  knowledge_type String?  @db.VarChar(40)
+  name           String   @db.VarChar(200)
+  description    String?  @db.Text
+  status         String   @default("approved") @db.VarChar(20)
+  source         String   @default("manual") @db.VarChar(20)
+  confidence     Float    @default(1.0)
+  tags           Json     @default("[]")
+  ai_job_id      String?  @db.VarChar(50)
+  // embedding vector(1536) — 在 _add_pgvector migration 里加
+  created_at     DateTime @default(now()) @db.Timestamptz
+  updated_at     DateTime @updatedAt @db.Timestamptz
+
+  graph              Graph      @relation(fields: [graph_id], references: [graph_id], onDelete: Cascade)
+  outgoing_relations Relation[] @relation("RelationSource")
+  incoming_relations Relation[] @relation("RelationTarget")
+
+  @@index([graph_id])
+  @@index([graph_id, status])
+  @@index([ai_job_id])
+  @@map("nodes")
+}
+
+model Relation {
+  relation_id   BigInt   @id @default(autoincrement())
+  graph_id      String   @db.VarChar(50)
+  source_id     String   @db.VarChar(80)
+  target_id     String   @db.VarChar(80)
+  relation_type String   @db.VarChar(40)
+  status        String   @default("approved") @db.VarChar(20)
+  confidence    Float    @default(1.0)
+  description   String?  @db.Text
+  ai_job_id     String?  @db.VarChar(50)
+  created_at    DateTime @default(now()) @db.Timestamptz
+  updated_at    DateTime @updatedAt @db.Timestamptz
+
+  graph  Graph @relation(fields: [graph_id], references: [graph_id], onDelete: Cascade)
+  source Node  @relation("RelationSource", fields: [source_id], references: [node_id], onDelete: Cascade)
+  target Node  @relation("RelationTarget", fields: [target_id], references: [node_id], onDelete: Cascade)
+
+  @@unique([source_id, target_id, relation_type], name: "relations_unique_edge")
+  @@index([graph_id])
+  @@index([source_id])
+  @@index([target_id])
+  @@map("relations")
+}
