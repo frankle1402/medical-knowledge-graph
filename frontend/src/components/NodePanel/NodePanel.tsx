@@ -8,6 +8,7 @@ interface NodePanelProps {
   onEdit: () => void;
   onDelete: () => void;
   onDeleteRelation: () => void;
+  onFocusNode?: (nodeId: string) => void;
 }
 
 export function NodePanel({
@@ -16,6 +17,7 @@ export function NodePanel({
   onEdit,
   onDelete,
   onDeleteRelation,
+  onFocusNode,
 }: NodePanelProps) {
   if (selectedNode) {
     return (
@@ -33,11 +35,20 @@ export function NodePanel({
         {selectedNode.tags && selectedNode.tags.length > 0 ? (
           <KV label="标签" value={selectedNode.tags.join(', ')} />
         ) : null}
-        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
           <Button onClick={onEdit}>编辑</Button>
           <Button variant="danger" onClick={onDelete}>
             删除
           </Button>
+          {onFocusNode ? (
+            <Button
+              variant="secondary"
+              onClick={() => onFocusNode(selectedNode.node_id)}
+              data-testid="focus-node-btn"
+            >
+              🎯 只看这个
+            </Button>
+          ) : null}
         </div>
       </div>
     );

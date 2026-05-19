@@ -12,6 +12,7 @@ import type {
 import { aiApi, graphsApi, nodesApi, relationsApi, templatesApi } from '../api';
 import { GraphCanvas } from '../components/GraphEditor/GraphCanvas';
 import { NodeForm } from '../components/GraphEditor/NodeForm';
+import { NodeSearchBox } from '../components/GraphEditor/NodeSearchBox';
 import { RelationForm } from '../components/GraphEditor/RelationForm';
 import { NodePanel } from '../components/NodePanel';
 import { ReviewPanel } from '../components/ReviewPanel';
@@ -53,6 +54,29 @@ export function GraphEditorPage() {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+
+  // Focus mode: subset of nodes whose 1-hop neighborhood stays bright; rest are
+  // dimmed. First entry = the user-picked center; subsequent entries come from
+  // double-clicking dimmed nodes to grow the visible subgraph.
+  const [focusedNodeIds, setFocusedNodeIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const focusCenterId = useMemo(
+    () => (focusedNodeIds.size > 0 ? Array.from(focusedNodeIds)[0]! : null),
+    [focusedNodeIds],
+  );
+  const focusCenterName =
+    focusCenterId ? (nodes.find((n) => n.node_id === focusCenterId)?.name ?? '(已删除)') : null;
+
+  const handleEnterFocus = (nodeId: string) => setFocusedNodeIds(new Set([nodeId]));
+  const handleExpandFocus = (nodeId: string) =>
+    setFocusedNodeIds((prev) => {
+      if (prev.has(nodeId)) return prev;
+      const next = new Set(prev);
+      next.add(nodeId);
+      return next;
+    });
+  const handleClearFocus = () => setFocusedNodeIds(new Set());
 
   const positionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
@@ -117,6 +141,12 @@ export function GraphEditorPage() {
     try {
       await nodesApi.remove(nodeId);
       removeNode(nodeId);
+      setFocusedNodeIds((prev) => {
+        if (!prev.has(nodeId)) return prev;
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
     } catch (err) {
       alert(err instanceof Error ? err.message : '删除失败');
     }
@@ -212,6 +242,7 @@ export function GraphEditorPage() {
         }}
       >
         <h3 style={{ marginTop: 0, fontSize: 13, color: '#111827' }}>工具</h3>
+        <NodeSearchBox nodes={nodes} onSelect={handleEnterFocus} />
         <Button
           variant="secondary"
           size="sm"
@@ -222,10 +253,31 @@ export function GraphEditorPage() {
         </Button>
         <p style={{ fontSize: 11, color: '#6b7280', marginTop: 16 }}>
           双击空白处可快速新建节点；从节点边缘拖出可创建关系；选中节点后按 Delete 可删除。
+          搜索节点可聚焦查看其 1 跳关联，双击暗色节点可继续展开。
         </p>
       </aside>
 
       <main style={{ gridArea: 'main', position: 'relative' }}>
+        {focusedNodeIds.size > 0 ? (
+          <div data-testid="focus-status-bar" style={focusBarStyle}>
+            <span>
+              🎯 聚焦中：<strong>{focusCenterName}</strong>
+              {focusedNodeIds.size > 1 ? (
+                <span style={{ color: '#6b7280', marginLeft: 6 }}>
+                  (+{focusedNodeIds.size - 1} 个邻居展开)
+                </span>
+              ) : null}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleClearFocus}
+              data-testid="clear-focus-btn"
+            >
+              清除聚焦
+            </Button>
+          </div>
+        ) : null}
         <GraphCanvas
           nodes={nodes}
           relations={relations}
@@ -237,6 +289,8 @@ export function GraphEditorPage() {
           onCanvasDoubleClick={handleCanvasDoubleClick}
           positions={positionsRef.current}
           onPositionChange={(id, pos) => positionsRef.current.set(id, pos)}
+          focusedNodeIds={focusedNodeIds}
+          onExpandFocus={handleExpandFocus}
         />
       </main>
 
@@ -247,6 +301,7 @@ export function GraphEditorPage() {
           onEdit={() => setEditNodeOpen(true)}
           onDelete={() => selectedNode && handleDeleteNode(selectedNode.node_id)}
           onDeleteRelation={handleDeleteRelation}
+          onFocusNode={handleEnterFocus}
         />
       </aside>
 
@@ -561,6 +616,25 @@ async function pollJob(
   }
   throw new Error('生成超时（已等待 5 分钟仍未返回，请检查后端日志或 LLM 配置）');
 }
+
+const focusBarStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 12,
+  left: 12,
+  right: 12,
+  zIndex: 5,
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 12,
+  padding: '8px 12px',
+  background: 'rgba(255,255,255,0.95)',
+  border: '1px solid #d1d5db',
+  borderRadius: 8,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+  fontSize: 13,
+  color: '#111827',
+};
 
 const selectStyle: React.CSSProperties = {
   width: '100%',

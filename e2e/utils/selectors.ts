@@ -31,8 +31,16 @@ export const sel = {
     leftToolbar: '[data-testid="left-toolbar"]',
     addNodeBtn: '[data-testid="left-toolbar"] button:has-text("+ 新建节点")',
     aiGenerateBtn: 'button:has-text("AI 生成图谱")',
-    canvasPane: '.react-flow__pane',
-    flowNode: '.react-flow__node',
+    canvasPane: '[data-testid="graph-canvas"]',
+    flowNode: '[data-testid="canvas-nodes"] li',
+    // Focus mode (Neo4j-style 1-hop subgraph isolation).
+    nodeSearchInput: '[data-testid="node-search-input"]',
+    nodeSearchResult: (nodeId: string) => `[data-testid="node-search-result-${nodeId}"]`,
+    focusNodeBtn: '[data-testid="focus-node-btn"]',
+    focusStatusBar: '[data-testid="focus-status-bar"]',
+    clearFocusBtn: '[data-testid="clear-focus-btn"]',
+    focusedMirrorNode: '[data-testid="canvas-nodes"] li[data-focus="focused"]',
+    dimmedMirrorNode: '[data-testid="canvas-nodes"] li[data-focus="dimmed"]',
   },
   createNode: {
     modal: '[data-testid="create-node-modal"]',

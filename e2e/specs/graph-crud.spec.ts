@@ -43,10 +43,12 @@ test.describe('图谱 + 节点 CRUD（admin）', () => {
     // knowledge_point is the default; knowledge_type select is auto-filled.
     await page.locator('form[aria-label="新建节点"] button[type="submit"]').click();
 
-    // The new node should render on the React Flow canvas.
+    // The new node should appear in the canvas. Cytoscape draws on a <canvas>
+    // element with no per-node DOM, so we assert via the hidden a11y mirror
+    // exposed by GraphCanvas. attached (not visible) — the mirror is sr-only.
     await expect(
       page.locator(sel.editor.flowNode, { hasText: '静脉输液' }).first(),
-    ).toBeVisible({ timeout: 10_000 });
+    ).toHaveCount(1, { timeout: 10_000 });
 
     // ---- Navigate back to the list and delete the graph ----
     page.on('dialog', (d) => d.accept()); // confirm the native window.confirm

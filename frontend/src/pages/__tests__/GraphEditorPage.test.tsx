@@ -6,21 +6,13 @@ import { GraphEditorPage } from '../GraphEditorPage';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { useGraphStore } from '../../stores';
 
-// react-flow uses ResizeObserver and DOMRect; jsdom needs both.
-vi.mock('reactflow', async () => {
+// Cytoscape requires a real <canvas> + ResizeObserver; jsdom can't render it
+// meaningfully, and the page-level tests don't care about canvas internals.
+// Stub GraphCanvas so we exercise the page logic only.
+vi.mock('../../components/GraphEditor/GraphCanvas', async () => {
   const React = await import('react');
   return {
-    __esModule: true,
-    default: ({ children }: { children?: React.ReactNode }) =>
-      React.createElement('div', { 'data-testid': 'mock-rf' }, children),
-    Background: () => null,
-    Controls: () => null,
-    MiniMap: () => null,
-    Handle: () => null,
-    Position: { Left: 'left', Right: 'right' },
-    ReactFlowProvider: ({ children }: { children: React.ReactNode }) => children,
-    applyNodeChanges: (_c: unknown, prev: unknown) => prev,
-    applyEdgeChanges: (_c: unknown, prev: unknown) => prev,
+    GraphCanvas: () => React.createElement('div', { 'data-testid': 'mock-canvas' }),
   };
 });
 
