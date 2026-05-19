@@ -41,6 +41,12 @@ export const sel = {
     clearFocusBtn: '[data-testid="clear-focus-btn"]',
     focusedMirrorNode: '[data-testid="canvas-nodes"] li[data-focus="focused"]',
     dimmedMirrorNode: '[data-testid="canvas-nodes"] li[data-focus="dimmed"]',
+    // Pack C/D: semantic search + learning panels.
+    semanticSearchBtn: '[data-testid="semantic-search-btn"]',
+    semanticBadge: '[data-testid="semantic-badge"]',
+    semanticScore: (nodeId: string) => `[data-testid="semantic-score-${nodeId}"]`,
+    showLearningPathBtn: '[data-testid="show-learning-path-btn"]',
+    openSynonymMergeBtn: '[data-testid="open-synonym-merge-btn"]',
   },
   createNode: {
     modal: '[data-testid="create-node-modal"]',
@@ -50,5 +56,34 @@ export const sel = {
     approveAll: '[data-testid="review-approve-all"]',
     approveSelected: '[data-testid="review-approve-selected"]',
     rejectAll: '[data-testid="review-reject-all"]',
+  },
+  learningPath: {
+    panel: '[data-testid="learning-path-panel"]',
+    close: '[data-testid="learning-path-close"]',
+    list: '[data-testid="learning-path-list"]',
+    step: (nodeId: string) => `[data-testid="learning-path-step-${nodeId}"]`,
+    target: '[data-testid="learning-path-target"]',
+    skeleton: '[data-testid="learning-path-skeleton"]',
+    empty: '[data-testid="learning-path-empty"]',
+    notFound: '[data-testid="learning-path-not-found"]',
+    error: '[data-testid="learning-path-error"]',
+    retry: '[data-testid="learning-path-retry"]',
+  },
+  synonymMerge: {
+    panel: '[data-testid="synonym-merge-panel"]',
+    threshold: '[data-testid="synonym-threshold"]',
+    thresholdValue: '[data-testid="synonym-threshold-value"]',
+    loading: '[data-testid="synonym-loading"]',
+    empty: '[data-testid="synonym-empty"]',
+    embeddingsNotReady: '[data-testid="synonym-embeddings-not-ready"]',
+    candidate: (aId: string, bId: string) =>
+      `[data-testid="synonym-candidate-${aId}-${bId}"]`,
+    keepA: (aId: string, bId: string) =>
+      `[data-testid="synonym-keep-a-${aId}-${bId}"]`,
+    keepB: (aId: string, bId: string) =>
+      `[data-testid="synonym-keep-b-${aId}-${bId}"]`,
+    confirmModal: '[data-testid="synonym-confirm-modal"]',
+    confirmOk: '[data-testid="synonym-confirm-ok"]',
+    confirmCancel: '[data-testid="synonym-confirm-cancel"]',
   },
 };
