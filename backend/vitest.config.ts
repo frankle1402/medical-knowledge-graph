@@ -4,6 +4,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Default to the Pack B Postgres path. The Neo4j fallback is exercised
+    // via the `test:neo4j` script which sets STORAGE_BACKEND=neo4j up-front;
+    // we honor an already-set value so that override works.
+    env: {
+      STORAGE_BACKEND: process.env.STORAGE_BACKEND ?? 'pg',
+    },
     include: ['src/**/*.test.ts'],
     setupFiles: ['./src/__tests__/setup.ts'],
     globalSetup: ['./src/__tests__/globalSetup.ts'],

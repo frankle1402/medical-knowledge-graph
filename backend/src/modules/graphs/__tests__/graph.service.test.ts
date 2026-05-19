@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { GraphService } from '../graph.service';
 import { runQuery } from '../../../lib/neo4j';
+import { getStorageBackend } from '../../../lib/storage-backend';
 
 describe('GraphService', () => {
   beforeAll(async () => {
-    // Smoke check that the schema exists. Tests that require constraints
-    // (e.g. duplicate node_id) will fail loudly otherwise.
-    await runQuery('RETURN 1 AS ok');
+    // Smoke check that the Neo4j schema exists. Tests that require constraints
+    // (e.g. duplicate node_id) will fail loudly otherwise. Skip on the PG
+    // backend so PG-only CI doesn't fail when no Neo4j is reachable.
+    if (getStorageBackend() !== 'pg') {
+      await runQuery('RETURN 1 AS ok');
+    }
   });
 
   it('create returns a graph_id with the graph_ prefix and zero counts', async () => {

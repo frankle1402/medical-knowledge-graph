@@ -61,12 +61,24 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
 // embedding module. The default is a no-op so Pack B alone has no behavior
 // change. The hook is fire-and-forget on purpose — it must not block user
 // requests if OpenAI is slow or down (Pack C uses an internal queue).
+//
+// `was_created` lets Pack C skip re-embedding nodes whose content didn't
+// change: on a pure ON MATCH update where name / description are unchanged,
+// the embedding is identical and the OpenAI call would be wasted. Each call
+// site of `fireNodeUpserted` MUST pass an accurate value:
+//   - create()       → true
+//   - update()       → false
+//   - createBatch()  → per row, derived from a pre-write existence probe
+//                      (timestamp comparison is unreliable because Prisma's
+//                      @updatedAt is client-generated and @default(now()) is
+//                      server-generated — they never match exactly).
 
 type NodeUpsertedHook = (node: {
   node_id: string;
   name: string;
   description?: string | null;
   tags?: unknown;
+  was_created: boolean;
 }) => void;
 
 let nodeUpsertedHook: NodeUpsertedHook | null = null;
@@ -78,7 +90,10 @@ export function setNodeUpsertedHook(hook: NodeUpsertedHook | null): void {
   nodeUpsertedHook = hook;
 }
 
-function fireNodeUpserted(n: Record<string, unknown>): void {
+function fireNodeUpserted(
+  n: Record<string, unknown>,
+  was_created: boolean,
+): void {
   if (!nodeUpsertedHook) return;
   if (typeof n.node_id !== 'string' || typeof n.name !== 'string') return;
   try {
@@ -87,6 +102,7 @@ function fireNodeUpserted(n: Record<string, unknown>): void {
       name: n.name,
       description: (n.description as string | null | undefined) ?? null,
       tags: n.tags,
+      was_created,
     });
   } catch {
     // Hook errors must not break the main write path.
@@ -131,7 +147,7 @@ const NodeServiceCrudNeo4j = {
       { graph_id, props },
     );
     const n = rows[0]?.n ?? null;
-    if (n) fireNodeUpserted(n);
+    if (n) fireNodeUpserted(n, true);
     return n;
   },
 
@@ -209,7 +225,7 @@ const NodeServiceCrudNeo4j = {
       { node_id, patch: cleaned },
     );
     const n = rows[0]?.n ?? null;
-    if (n) fireNodeUpserted(n);
+    if (n) fireNodeUpserted(n, false);
     return n;
   },
 
@@ -260,6 +276,15 @@ const NodeServiceBatchNeo4j = {
       });
     });
 
+    // Probe which ids already exist before the MERGE so we can report
+    // was_created accurately per row to the Pack C hook.
+    const ids = nodes.map((n) => n.node_id as string);
+    const preProbe = await runQuery<{ node_id: string }>(
+      `MATCH (n:Node) WHERE n.node_id IN $ids RETURN n.node_id AS node_id`,
+      { ids },
+    );
+    const existedBefore = new Set(preProbe.map((r) => r.node_id));
+
     await runQuery(
       `MATCH (g:Graph {graph_id: $graphId})
        UNWIND $nodes AS node
@@ -269,7 +294,10 @@ const NodeServiceBatchNeo4j = {
        MERGE (n)-[:BELONGS_TO_GRAPH]->(g)`,
       { nodes, graphId },
     );
-    for (const n of nodes) fireNodeUpserted(n as Record<string, unknown>);
+    for (const n of nodes) {
+      const was_created = !existedBefore.has(n.node_id as string);
+      fireNodeUpserted(n as Record<string, unknown>, was_created);
+    }
     return nodes as Array<Record<string, unknown>>;
   },
 
@@ -334,6 +362,25 @@ const NodeServiceNeo4j = { ...NodeServiceCrudNeo4j, ...NodeServiceBatchNeo4j };
 // ---------------------------------------------------------------------------
 // Postgres / Prisma implementation
 // ---------------------------------------------------------------------------
+
+/**
+ * Maximum number of rows per single `prisma.$transaction([...])` call inside
+ * `createBatch`. Postgres' `max_prepared_statements` (default 100, often
+ * raised to a few thousand) is shared across the whole transaction; sending
+ * 5k+ upserts in one shot has been observed to trip the limit on AI-generated
+ * runs. Atomicity becomes per-chunk rather than per-call — Pack C / Agent-C
+ * already retry the whole job on failure, so this is acceptable.
+ */
+const BATCH_CHUNK_SIZE = 500;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) return [arr];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
 
 /**
  * Columns that the `nodes` table actually owns. AI input may contain extra
@@ -411,7 +458,7 @@ const NodeServicePg = {
 
     const created = await prisma.node.create({ data });
     const plain = toPlainNode(created as unknown as Record<string, unknown>);
-    fireNodeUpserted(plain);
+    fireNodeUpserted(plain, true);
     return plain;
   },
 
@@ -464,7 +511,7 @@ const NodeServicePg = {
         data: cleaned as Prisma.NodeUncheckedUpdateInput,
       });
       const plain = toPlainNode(updated as unknown as Record<string, unknown>);
-      fireNodeUpserted(plain);
+      fireNodeUpserted(plain, false);
       return plain;
     } catch (err) {
       if (isP2025(err)) return null;
@@ -521,34 +568,56 @@ const NodeServicePg = {
       } as unknown as Prisma.NodeUncheckedCreateInput & Record<string, unknown>;
     });
 
-    // Run upserts in a single transaction so a partial failure does not leave
-    // half a batch behind — Agent-C retries on the whole job, so atomicity
-    // matters more than peak throughput here.
-    const upserted = await prisma.$transaction(
-      prepared.map((data) =>
-        prisma.node.upsert({
-          where: { node_id: data.node_id! },
-          create: data,
-          update: {
-            // ON MATCH SET n += node — only mutable fields, never identity.
-            name: data.name as string,
-            description: (data.description as string | null | undefined) ?? null,
-            knowledge_type:
-              (data.knowledge_type as string | null | undefined) ?? null,
-            status: data.status as string,
-            source: data.source as string,
-            confidence: (data.confidence as number | undefined) ?? 1.0,
-            tags: data.tags as Prisma.InputJsonValue,
-            ai_job_id: (data.ai_job_id as string | null | undefined) ?? null,
-          },
-        }),
-      ),
-    );
+    // Probe which ids already exist before the upsert so the Pack C hook
+    // gets an accurate `was_created` per row. Timestamp comparison
+    // (created_at === updated_at) doesn't work because Prisma's @updatedAt
+    // is client-generated while @default(now()) is server-generated; they
+    // never line up exactly even on insert.
+    const allIds = prepared.map((p) => p.node_id as string);
+    const existingRows = await prisma.node.findMany({
+      where: { node_id: { in: allIds } },
+      select: { node_id: true },
+    });
+    const existedBefore = new Set(existingRows.map((r) => r.node_id));
+
+    // Run upserts in chunks of BATCH_CHUNK_SIZE so a single huge AI batch
+    // doesn't trip Postgres' max_prepared_statements. Atomicity is
+    // per-chunk now, not per-call — Agent-C retries on the whole job, so
+    // this trade-off is acceptable.
+    const upserted: Array<Record<string, unknown>> = [];
+    for (const slice of chunk(prepared, BATCH_CHUNK_SIZE)) {
+      const written = await prisma.$transaction(
+        slice.map((data) =>
+          prisma.node.upsert({
+            where: { node_id: data.node_id! },
+            create: data,
+            update: {
+              // ON MATCH SET n += node — only mutable fields, never identity.
+              name: data.name as string,
+              description: (data.description as string | null | undefined) ?? null,
+              knowledge_type:
+                (data.knowledge_type as string | null | undefined) ?? null,
+              status: data.status as string,
+              source: data.source as string,
+              confidence: (data.confidence as number | undefined) ?? 1.0,
+              tags: data.tags as Prisma.InputJsonValue,
+              ai_job_id: (data.ai_job_id as string | null | undefined) ?? null,
+            },
+          }),
+        ),
+      );
+      for (const w of written) {
+        upserted.push(w as unknown as Record<string, unknown>);
+      }
+    }
 
     const out = upserted.map((n) =>
       toPlainNode(n as unknown as Record<string, unknown>),
     );
-    for (const n of out) fireNodeUpserted(n);
+    for (const n of out) {
+      const was_created = !existedBefore.has(n.node_id as string);
+      fireNodeUpserted(n, was_created);
+    }
     return out;
   },
 

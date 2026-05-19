@@ -3,10 +3,12 @@
  * (legacy fallback) for the graph data services. The default is `neo4j`
  * to keep older deployments working until they explicitly opt in.
  *
- * Pack B reads `STORAGE_BACKEND` once at module evaluation time inside each
- * service, so toggling at runtime is not supported by design — restart the
- * process to switch backends. Tests that need to compare backends call
- * `getStorageBackend()` directly after mutating `process.env.STORAGE_BACKEND`.
+ * Resolution is per-call by design: each `getStorageBackend()` reads
+ * `process.env.STORAGE_BACKEND` afresh so tests can flip backends mid-suite
+ * (the parity run sets `STORAGE_BACKEND=neo4j` for the same test files that
+ * default to `pg`). In production, set `STORAGE_BACKEND` once at process
+ * start — the per-call cost is a single env lookup and is negligible, but
+ * mutating the env at runtime is not a supported configuration pattern.
  */
 export type StorageBackend = 'pg' | 'neo4j';
 

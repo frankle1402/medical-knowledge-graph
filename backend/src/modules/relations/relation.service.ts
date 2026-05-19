@@ -335,6 +335,22 @@ function isP2025(err: unknown): boolean {
   );
 }
 
+/**
+ * Maximum number of upserts per single `prisma.$transaction([...])` call
+ * inside `createBatch`. Mirrors NodeService — see comment there for why
+ * 500 (Postgres `max_prepared_statements`).
+ */
+const BATCH_CHUNK_SIZE = 500;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) return [arr];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
 const RelationServicePg = {
   async create(
     graph_id: string,
@@ -451,7 +467,10 @@ const RelationServicePg = {
     if (valid.length === 0) return 0;
 
     // Upsert via the (source_id, target_id, relation_type) unique constraint
-    // — same idempotency the Cypher MERGE provided.
+    // — same idempotency the Cypher MERGE provided. Chunk the upserts so a
+    // single huge AI batch doesn't trip Postgres' max_prepared_statements;
+    // atomicity is per-chunk now, which Agent-C tolerates because it retries
+    // on the whole job.
     const ops = valid.map((r) =>
       prisma.relation.upsert({
         where: {
@@ -479,8 +498,12 @@ const RelationServicePg = {
         },
       }),
     );
-    const written = await prisma.$transaction(ops);
-    return written.length;
+    let written = 0;
+    for (const slice of chunk(ops, BATCH_CHUNK_SIZE)) {
+      const res = await prisma.$transaction(slice);
+      written += res.length;
+    }
+    return written;
   },
 
   async bulkUpdateStatusByJob(

@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GraphService } from '../../graphs/graph.service';
-import { NodeService } from '../node.service';
+import { NodeService, setNodeUpsertedHook } from '../node.service';
 
 /**
  * Each test starts with a fresh graph because the global `setup.ts`
@@ -216,5 +216,96 @@ describe('NodeService', () => {
     );
     const deleted = await NodeService.bulkDeleteByJob(graphId, jobId);
     expect(deleted).toBe(1);
+  });
+
+  describe('NodeUpsertedHook was_created signal', () => {
+    type HookCall = {
+      node_id: string;
+      name: string;
+      description?: string | null;
+      tags?: unknown;
+      was_created: boolean;
+    };
+
+    let calls: HookCall[];
+
+    beforeEach(() => {
+      calls = [];
+      setNodeUpsertedHook((payload) => {
+        calls.push(payload as HookCall);
+      });
+    });
+
+    afterEach(() => {
+      setNodeUpsertedHook(null);
+    });
+
+    it('create() fires hook with was_created=true', async () => {
+      await NodeService.create(graphId, {
+        node_type: 'knowledge_point',
+        name: 'fresh',
+        knowledge_type: '概念类',
+      } as never);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.was_created).toBe(true);
+    });
+
+    it('update() fires hook with was_created=false', async () => {
+      const n = await NodeService.create(graphId, {
+        node_type: 'knowledge_point',
+        name: 'updateme',
+        knowledge_type: '概念类',
+      } as never);
+      calls.length = 0; // ignore the create hook
+      await NodeService.update(n!.node_id as string, {
+        description: 'patched',
+      } as never);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.was_created).toBe(false);
+    });
+
+    it('createBatch() reports was_created=true for new rows and =false on second pass', async () => {
+      const inputs = [
+        {
+          node_id: 'KP_BATCH_HOOK_1',
+          node_type: 'knowledge_point',
+          name: 'b1',
+          knowledge_type: '概念类',
+        },
+        {
+          node_id: 'KP_BATCH_HOOK_2',
+          node_type: 'knowledge_point',
+          name: 'b2',
+          knowledge_type: '概念类',
+        },
+      ];
+      await NodeService.createBatch(graphId, inputs, { ai_job_id: 'jx' });
+      expect(calls).toHaveLength(2);
+      expect(calls.every((c) => c.was_created === true)).toBe(true);
+
+      calls.length = 0;
+      // Second pass with same node_ids → upsert hits ON MATCH path.
+      await NodeService.createBatch(graphId, inputs, { ai_job_id: 'jx' });
+      expect(calls).toHaveLength(2);
+      expect(calls.every((c) => c.was_created === false)).toBe(true);
+    });
+  });
+
+  it('createBatch chunks > 500 rows without crashing (regression for max_prepared_statements)', async () => {
+    const N = 1100;
+    const inputs = Array.from({ length: N }, (_, i) => ({
+      node_id: `KP_CHUNK_${i}`,
+      node_type: 'knowledge_point' as const,
+      name: `c${i}`,
+      knowledge_type: '概念类',
+    }));
+    const created = await NodeService.createBatch(graphId, inputs, {
+      ai_job_id: 'chunk-job',
+      status: 'candidate',
+    });
+    expect(created).toHaveLength(N);
+    // Sanity: every produced row carries the unique node_id we forced.
+    const ids = new Set(created.map((n) => n.node_id as string));
+    expect(ids.size).toBe(N);
   });
 });

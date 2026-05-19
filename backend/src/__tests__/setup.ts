@@ -13,6 +13,11 @@ let neo4jCleanupAvailable: boolean | null = null;
 // RESTART IDENTITY resets the BIGSERIAL relation_id so tests can rely on
 // freshly low ids per case).
 //
+// NOTE: Because RESTART IDENTITY resets BIGSERIAL between every test, tests
+// MUST NOT depend on specific relation_id values (e.g. expecting `1` or
+// `42`). Reach for `relation_id: expect.stringMatching(/^\d+$/)` or compare
+// to the value returned by the create call.
+//
 // Neo4j cleanup uses MATCH ... DETACH DELETE on the test database. If the
 // local Neo4j Community edition does not support multiple databases, the
 // driver falls back to the default db; isolation then relies on graph_id /
