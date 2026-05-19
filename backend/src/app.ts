@@ -19,6 +19,7 @@ import {
   relationRouter,
 } from './modules/relations/relation.routes.js';
 import { aiRouter } from './modules/ai/index.js';
+import { learningRoutes } from './modules/learning/learning.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -60,6 +61,14 @@ export function createApp(): Express {
   // ===== MOUNT-POINTS (Agent-C reserved) =====
   // Agent-C will add: app.use('/api/ai', aiRouter)
   app.use('/api/ai', aiRouter);
+
+  // pack-d routes
+  // Learning routes mount at /api so the router can write the full path
+  // (/nodes/:node_id/learning-path, /graphs/:graph_id/knowledge-gap,
+  // /graphs/:graph_id/synonym-candidates) without colliding with the
+  // existing /api/nodes and /api/graphs routers — Express matches by
+  // exact path so the trailing segments make these distinct.
+  app.use('/api', learningRoutes);
 
   // Swagger UI (consumes openapi.yaml produced by @mkg/shared)
   mountSwagger(app);
