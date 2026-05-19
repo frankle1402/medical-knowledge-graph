@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import {
   NodeCreateInput,
   NodeUpdateInput,
@@ -6,6 +7,8 @@ import {
   NodeStatus,
 } from '@mkg/shared';
 import { runQuery } from '../../lib/neo4j.js';
+import { prisma } from '../../lib/prisma.js';
+import { getStorageBackend } from '../../lib/storage-backend.js';
 import { generateNodeId } from '../../services/neo4j/id.js';
 
 /**
@@ -49,13 +52,57 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return out as Partial<T>;
 }
 
-const NodeServiceCrud = {
+// ---------------------------------------------------------------------------
+// Pack C hook surface
+// ---------------------------------------------------------------------------
+//
+// Pack C will register an embedding-write callback here so newly created /
+// updated nodes get an OpenAI embedding without coupling NodeService to the
+// embedding module. The default is a no-op so Pack B alone has no behavior
+// change. The hook is fire-and-forget on purpose — it must not block user
+// requests if OpenAI is slow or down (Pack C uses an internal queue).
+
+type NodeUpsertedHook = (node: {
+  node_id: string;
+  name: string;
+  description?: string | null;
+  tags?: unknown;
+}) => void;
+
+let nodeUpsertedHook: NodeUpsertedHook | null = null;
+
+/**
+ * Pack C uses this to subscribe. Setting null detaches.
+ */
+export function setNodeUpsertedHook(hook: NodeUpsertedHook | null): void {
+  nodeUpsertedHook = hook;
+}
+
+function fireNodeUpserted(n: Record<string, unknown>): void {
+  if (!nodeUpsertedHook) return;
+  if (typeof n.node_id !== 'string' || typeof n.name !== 'string') return;
+  try {
+    nodeUpsertedHook({
+      node_id: n.node_id,
+      name: n.name,
+      description: (n.description as string | null | undefined) ?? null,
+      tags: n.tags,
+    });
+  } catch {
+    // Hook errors must not break the main write path.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Neo4j implementation (legacy fallback — preserved verbatim apart from the
+// hook calls).
+// ---------------------------------------------------------------------------
+
+const NodeServiceCrudNeo4j = {
   async create(
     graph_id: string,
     input: z.infer<typeof NodeCreateInput> & Record<string, unknown>,
   ): Promise<Record<string, unknown> | null> {
-    // Confirm the graph exists *before* attempting the create. Without this,
-    // a typo in graph_id silently produces zero matches (no error from Cypher).
     const exists = await runQuery<{ c: number }>(
       'MATCH (g:Graph {graph_id: $graph_id}) RETURN count(g) AS c',
       { graph_id },
@@ -67,10 +114,6 @@ const NodeServiceCrud = {
       generateNodeId(input.node_type);
     const now = new Date().toISOString();
 
-    // Normalize props: scalars + arrays are accepted by Neo4j; nested objects
-    // would silently break, so we keep them flat as defined by the shared
-    // schema. Default status defers to schema default ('candidate'); routes
-    // typically force 'approved' for manual creation.
     const props = compact({
       ...input,
       node_id,
@@ -87,12 +130,12 @@ const NodeServiceCrud = {
        RETURN n { .* } AS n`,
       { graph_id, props },
     );
-    return rows[0]?.n ?? null;
+    const n = rows[0]?.n ?? null;
+    if (n) fireNodeUpserted(n);
+    return n;
   },
 
   async list(graph_id: string, q: NodeListQuery): Promise<NodeListResult> {
-    // Build a single WHERE clause from optional filters. Each variant binds
-    // through parameters; the cypher string itself is constant.
     const filters: string[] = [];
     const params: Record<string, unknown> = {
       graph_id,
@@ -113,8 +156,6 @@ const NodeServiceCrud = {
     }
     const whereExtra = filters.length ? ' AND ' + filters.join(' AND ') : '';
 
-    // Note: SKIP / LIMIT in Cypher 5 require Integer; the driver coerces
-    // JS numbers automatically.
     const items = await runQuery<{ n: Record<string, unknown> }>(
       `MATCH (g:Graph {graph_id: $graph_id})<-[:BELONGS_TO_GRAPH]-(n:Node)
        WHERE 1=1${whereExtra}
@@ -153,15 +194,13 @@ const NodeServiceCrud = {
     node_id: string,
     patch: z.infer<typeof NodeUpdateInput> & Record<string, unknown>,
   ): Promise<Record<string, unknown> | null> {
-    // Disallow mutating identity / type so that the discriminated-union
-    // invariants stay consistent.
     const cleaned = compact(patch) as Record<string, unknown>;
     delete cleaned.node_id;
     delete cleaned.node_type;
     delete cleaned.created_at;
     delete cleaned.created_by;
     if (Object.keys(cleaned).length === 0) {
-      return NodeServiceCrud.findById(node_id);
+      return NodeServiceCrudNeo4j.findById(node_id);
     }
     const rows = await runQuery<{ n: Record<string, unknown> }>(
       `MATCH (n:Node {node_id: $node_id})
@@ -169,7 +208,9 @@ const NodeServiceCrud = {
        RETURN n { .* } AS n`,
       { node_id, patch: cleaned },
     );
-    return rows[0]?.n ?? null;
+    const n = rows[0]?.n ?? null;
+    if (n) fireNodeUpserted(n);
+    return n;
   },
 
   async remove(node_id: string): Promise<boolean> {
@@ -196,12 +237,7 @@ const NodeServiceCrud = {
   },
 };
 
-const NodeServiceBatch = {
-  /**
-   * createBatch — used by Agent-C's AI pipeline. Writes N nodes in a single
-   * round-trip via UNWIND, attaches them to the target graph, and returns
-   * the (possibly augmented) node payloads with generated ids.
-   */
+const NodeServiceBatchNeo4j = {
   async createBatch(
     graphId: string,
     inputs: Array<Record<string, unknown>>,
@@ -224,7 +260,6 @@ const NodeServiceBatch = {
       });
     });
 
-    // Note: ON CREATE / ON MATCH split keeps idempotency for re-runs by job id.
     await runQuery(
       `MATCH (g:Graph {graph_id: $graphId})
        UNWIND $nodes AS node
@@ -234,6 +269,7 @@ const NodeServiceBatch = {
        MERGE (n)-[:BELONGS_TO_GRAPH]->(g)`,
       { nodes, graphId },
     );
+    for (const n of nodes) fireNodeUpserted(n as Record<string, unknown>);
     return nodes as Array<Record<string, unknown>>;
   },
 
@@ -293,5 +329,325 @@ const NodeServiceBatch = {
   },
 };
 
-export const NodeService = { ...NodeServiceCrud, ...NodeServiceBatch };
+const NodeServiceNeo4j = { ...NodeServiceCrudNeo4j, ...NodeServiceBatchNeo4j };
+
+// ---------------------------------------------------------------------------
+// Postgres / Prisma implementation
+// ---------------------------------------------------------------------------
+
+/**
+ * Columns that the `nodes` table actually owns. AI input may contain extra
+ * keys (difficulty, importance, standard_term, …) that Neo4j stored as
+ * loose properties; Postgres has a fixed schema, so non-column inputs are
+ * silently dropped at the DB boundary. Adding new columns is a Prisma
+ * schema migration, not a service change.
+ */
+const NODE_COLUMNS = new Set([
+  'node_id',
+  'graph_id',
+  'node_type',
+  'knowledge_type',
+  'name',
+  'description',
+  'status',
+  'source',
+  'confidence',
+  'tags',
+  'ai_job_id',
+]);
+
+function pickNodeColumns(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (NODE_COLUMNS.has(k) && v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Convert a Prisma `Node` row to the loose Record the routes return.
+ * Drops nulls (legacy Cypher omitted absent props), serializes Date columns
+ * to ISO strings, and strips the binary `embedding` column.
+ */
+function toPlainNode(n: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(n)) {
+    if (k === 'embedding') continue;
+    if (v === null || v === undefined) continue;
+    if (v instanceof Date) {
+      out[k] = v.toISOString();
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+const NodeServicePg = {
+  async create(
+    graph_id: string,
+    input: z.infer<typeof NodeCreateInput> & Record<string, unknown>,
+  ): Promise<Record<string, unknown> | null> {
+    // Mirror the Cypher path: missing graph returns null instead of throwing.
+    const graphExists = await prisma.graph.findUnique({
+      where: { graph_id },
+      select: { graph_id: true },
+    });
+    if (!graphExists) return null;
+
+    const node_id =
+      (typeof input.node_id === 'string' && input.node_id) ||
+      generateNodeId(input.node_type);
+    const data = {
+      ...pickNodeColumns(input),
+      node_id,
+      graph_id,
+      status: (input.status as string | undefined) ?? 'candidate',
+      source: (input.source as string | undefined) ?? 'manual',
+      tags: Array.isArray(input.tags) ? (input.tags as unknown[]) : [],
+    } as unknown as Prisma.NodeUncheckedCreateInput;
+
+    const created = await prisma.node.create({ data });
+    const plain = toPlainNode(created as unknown as Record<string, unknown>);
+    fireNodeUpserted(plain);
+    return plain;
+  },
+
+  async list(graph_id: string, q: NodeListQuery): Promise<NodeListResult> {
+    const where: Prisma.NodeWhereInput = { graph_id };
+    if (q.node_type) where.node_type = q.node_type;
+    if (q.status) where.status = q.status;
+    if (q.keyword) where.name = { contains: q.keyword, mode: 'insensitive' };
+
+    const [items, total] = await Promise.all([
+      prisma.node.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: q.skip,
+        take: q.limit,
+      }),
+      prisma.node.count({ where }),
+    ]);
+
+    return {
+      items: items.map((n) => toPlainNode(n as unknown as Record<string, unknown>)),
+      total,
+      skip: q.skip,
+      limit: q.limit,
+    };
+  },
+
+  async findById(node_id: string): Promise<Record<string, unknown> | null> {
+    const n = await prisma.node.findUnique({ where: { node_id } });
+    if (!n) return null;
+    return toPlainNode(n as unknown as Record<string, unknown>);
+  },
+
+  async update(
+    node_id: string,
+    patch: z.infer<typeof NodeUpdateInput> & Record<string, unknown>,
+  ): Promise<Record<string, unknown> | null> {
+    // Forbid mutating identity / type — the discriminated unions in @mkg/shared
+    // depend on these being fixed once a node exists.
+    const cleaned = pickNodeColumns(patch);
+    delete cleaned.node_id;
+    delete cleaned.node_type;
+    delete cleaned.graph_id;
+    if (Object.keys(cleaned).length === 0) {
+      return NodeServicePg.findById(node_id);
+    }
+    try {
+      const updated = await prisma.node.update({
+        where: { node_id },
+        data: cleaned as Prisma.NodeUncheckedUpdateInput,
+      });
+      const plain = toPlainNode(updated as unknown as Record<string, unknown>);
+      fireNodeUpserted(plain);
+      return plain;
+    } catch (err) {
+      if (isP2025(err)) return null;
+      throw err;
+    }
+  },
+
+  async remove(node_id: string): Promise<boolean> {
+    try {
+      await prisma.node.delete({ where: { node_id } });
+      return true;
+    } catch (err) {
+      if (isP2025(err)) return false;
+      throw err;
+    }
+  },
+
+  async batchApprove(node_ids: string[]): Promise<{ updated: number }> {
+    if (node_ids.length === 0) return { updated: 0 };
+    const res = await prisma.node.updateMany({
+      where: { node_id: { in: node_ids } },
+      data: { status: 'approved' },
+    });
+    return { updated: res.count };
+  },
+
+  async createBatch(
+    graphId: string,
+    inputs: Array<Record<string, unknown>>,
+    opts: BatchOptions = {},
+  ): Promise<Array<Record<string, unknown>>> {
+    if (inputs.length === 0) return [];
+    const prepared = inputs.map((n) => {
+      const node_type = n.node_type as Parameters<typeof generateNodeId>[0];
+      const node_id =
+        (typeof n.node_id === 'string' && n.node_id) ||
+        generateNodeId(node_type);
+      return {
+        ...pickNodeColumns(n),
+        node_id,
+        graph_id: graphId,
+        status:
+          (opts.status as string | undefined) ??
+          (n.status as string | undefined) ??
+          'candidate',
+        source:
+          (opts.source as string | undefined) ??
+          (n.source as string | undefined) ??
+          'ai_generated',
+        ai_job_id:
+          (opts.ai_job_id as string | undefined) ??
+          (n.ai_job_id as string | undefined),
+        tags: Array.isArray(n.tags) ? (n.tags as unknown[]) : [],
+      } as unknown as Prisma.NodeUncheckedCreateInput & Record<string, unknown>;
+    });
+
+    // Run upserts in a single transaction so a partial failure does not leave
+    // half a batch behind — Agent-C retries on the whole job, so atomicity
+    // matters more than peak throughput here.
+    const upserted = await prisma.$transaction(
+      prepared.map((data) =>
+        prisma.node.upsert({
+          where: { node_id: data.node_id! },
+          create: data,
+          update: {
+            // ON MATCH SET n += node — only mutable fields, never identity.
+            name: data.name as string,
+            description: (data.description as string | null | undefined) ?? null,
+            knowledge_type:
+              (data.knowledge_type as string | null | undefined) ?? null,
+            status: data.status as string,
+            source: data.source as string,
+            confidence: (data.confidence as number | undefined) ?? 1.0,
+            tags: data.tags as Prisma.InputJsonValue,
+            ai_job_id: (data.ai_job_id as string | null | undefined) ?? null,
+          },
+        }),
+      ),
+    );
+
+    const out = upserted.map((n) =>
+      toPlainNode(n as unknown as Record<string, unknown>),
+    );
+    for (const n of out) fireNodeUpserted(n);
+    return out;
+  },
+
+  async bulkUpdateStatusByJob(
+    graphId: string,
+    aiJobId: string,
+    status: z.infer<typeof NodeStatus>,
+  ): Promise<number> {
+    const res = await prisma.node.updateMany({
+      where: { graph_id: graphId, ai_job_id: aiJobId },
+      data: { status },
+    });
+    return res.count;
+  },
+
+  async bulkUpdateStatusByIds(
+    graphId: string,
+    nodeIds: string[],
+    status: z.infer<typeof NodeStatus>,
+  ): Promise<number> {
+    if (nodeIds.length === 0) return 0;
+    const res = await prisma.node.updateMany({
+      where: { graph_id: graphId, node_id: { in: nodeIds } },
+      data: { status },
+    });
+    return res.count;
+  },
+
+  async bulkDeleteByJob(graphId: string, aiJobId: string): Promise<number> {
+    const res = await prisma.node.deleteMany({
+      where: {
+        graph_id: graphId,
+        ai_job_id: aiJobId,
+        status: 'candidate',
+      },
+    });
+    return res.count;
+  },
+
+  async listByAiJob(
+    graphId: string,
+    aiJobId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const rows = await prisma.node.findMany({
+      where: { graph_id: graphId, ai_job_id: aiJobId },
+      orderBy: { created_at: 'asc' },
+    });
+    return rows.map((n) => toPlainNode(n as unknown as Record<string, unknown>));
+  },
+};
+
+function isP2025(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === 'P2025'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Public proxy
+// ---------------------------------------------------------------------------
+
+function impl() {
+  return getStorageBackend() === 'pg' ? NodeServicePg : NodeServiceNeo4j;
+}
+
+export const NodeService = {
+  create: (
+    graph_id: string,
+    input: z.infer<typeof NodeCreateInput> & Record<string, unknown>,
+  ) => impl().create(graph_id, input),
+  list: (graph_id: string, q: NodeListQuery) => impl().list(graph_id, q),
+  findById: (node_id: string) => impl().findById(node_id),
+  update: (
+    node_id: string,
+    patch: z.infer<typeof NodeUpdateInput> & Record<string, unknown>,
+  ) => impl().update(node_id, patch),
+  remove: (node_id: string) => impl().remove(node_id),
+  batchApprove: (node_ids: string[]) => impl().batchApprove(node_ids),
+  createBatch: (
+    graphId: string,
+    inputs: Array<Record<string, unknown>>,
+    opts: BatchOptions = {},
+  ) => impl().createBatch(graphId, inputs, opts),
+  bulkUpdateStatusByJob: (
+    graphId: string,
+    aiJobId: string,
+    status: z.infer<typeof NodeStatus>,
+  ) => impl().bulkUpdateStatusByJob(graphId, aiJobId, status),
+  bulkUpdateStatusByIds: (
+    graphId: string,
+    nodeIds: string[],
+    status: z.infer<typeof NodeStatus>,
+  ) => impl().bulkUpdateStatusByIds(graphId, nodeIds, status),
+  bulkDeleteByJob: (graphId: string, aiJobId: string) =>
+    impl().bulkDeleteByJob(graphId, aiJobId),
+  listByAiJob: (graphId: string, aiJobId: string) =>
+    impl().listByAiJob(graphId, aiJobId),
+};
 export type NodeService = typeof NodeService;
