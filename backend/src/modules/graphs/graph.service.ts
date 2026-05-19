@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { GraphType } from '@mkg/shared';
 import { runQuery } from '../../lib/neo4j.js';
+import { prisma } from '../../lib/prisma.js';
+import { getStorageBackend } from '../../lib/storage-backend.js';
 import { generateGraphId } from '../../services/neo4j/id.js';
 
 /**
@@ -52,16 +54,14 @@ export interface GraphDetail {
   relations: Array<Record<string, unknown>>;
 }
 
-/**
- * GraphService — Cypher access for the Graph node + its membership relations.
- *
- * All queries are parameterized; never interpolate user input into Cypher.
- */
-export const GraphService = {
+// ---------------------------------------------------------------------------
+// Neo4j implementation (legacy fallback — preserved verbatim)
+// ---------------------------------------------------------------------------
+
+const GraphServiceNeo4j = {
   async create(input: CreateGraphInput): Promise<GraphRecord> {
     const graph_id = generateGraphId();
     const now = new Date().toISOString();
-    // Strip undefined to keep the stored properties tidy.
     const props: Record<string, unknown> = {
       graph_id,
       graph_name: input.graph_name,
@@ -168,14 +168,12 @@ export const GraphService = {
     graph_id: string,
     patch: UpdateGraphInput,
   ): Promise<GraphRecord | null> {
-    // Drop undefined entries — Cypher's `+=` would otherwise overwrite stored
-    // values with null.
     const cleaned: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(patch)) {
       if (v !== undefined) cleaned[k] = v;
     }
     if (Object.keys(cleaned).length === 0) {
-      const detail = await GraphService.findById(graph_id);
+      const detail = await GraphServiceNeo4j.findById(graph_id);
       return detail?.graph ?? null;
     }
     const rows = await runQuery<{ g: Record<string, unknown> }>(
@@ -185,14 +183,11 @@ export const GraphService = {
       { graph_id, patch: cleaned },
     );
     if (!rows[0]) return null;
-    // Recompute counts to keep response shape consistent.
-    const detail = await GraphService.findById(graph_id);
+    const detail = await GraphServiceNeo4j.findById(graph_id);
     return detail?.graph ?? null;
   },
 
   async remove(graph_id: string): Promise<boolean> {
-    // First detach-delete every node belonging to the graph, then the graph itself.
-    // This avoids leaving orphan Node records when the graph is removed.
     await runQuery(
       `MATCH (g:Graph {graph_id: $graph_id})<-[:BELONGS_TO_GRAPH]-(n:Node)
        DETACH DELETE n`,
@@ -209,6 +204,242 @@ export const GraphService = {
   },
 
   async exportToJson(graph_id: string): Promise<GraphDetail | null> {
-    return GraphService.findById(graph_id);
+    return GraphServiceNeo4j.findById(graph_id);
   },
+};
+
+// ---------------------------------------------------------------------------
+// Postgres / Prisma implementation
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a Prisma Graph row into the public GraphRecord shape.
+ *
+ * - `created_at` / `updated_at` are emitted as ISO strings to keep the API
+ *   response identical to the Neo4j-era serialization (driver returned
+ *   neo4j.DateTime → toString() → ISO).
+ * - Nullable text columns are dropped when null so the JSON payload is
+ *   shorter and matches the legacy "absent" semantics rather than carrying
+ *   null bombs to the frontend.
+ */
+function toGraphRecord(
+  g: {
+    graph_id: string;
+    graph_name: string;
+    graph_type: string;
+    subject: string | null;
+    course_name: string | null;
+    description: string | null;
+    status: string;
+    created_by: string | null;
+    created_at: Date;
+    updated_at: Date;
+  },
+  nodeCount: number,
+  relationCount: number,
+): GraphRecord {
+  const out: GraphRecord = {
+    graph_id: g.graph_id,
+    graph_name: g.graph_name,
+    graph_type: g.graph_type,
+    status: g.status,
+    node_count: nodeCount,
+    relation_count: relationCount,
+  };
+  if (g.subject !== null) out.subject = g.subject;
+  if (g.course_name !== null) out.course_name = g.course_name;
+  if (g.description !== null) out.description = g.description;
+  if (g.created_by !== null) out.created_by = g.created_by;
+  out.created_at = g.created_at.toISOString();
+  out.updated_at = g.updated_at.toISOString();
+  return out;
+}
+
+const GraphServicePg = {
+  async create(input: CreateGraphInput): Promise<GraphRecord> {
+    const graph_id = generateGraphId();
+    const created = await prisma.graph.create({
+      data: {
+        graph_id,
+        graph_name: input.graph_name,
+        graph_type: input.graph_type,
+        subject: input.subject ?? null,
+        course_name: input.course_name ?? null,
+        description: input.description ?? null,
+        created_by: input.created_by,
+      },
+    });
+    return toGraphRecord(created, 0, 0);
+  },
+
+  async list(): Promise<GraphRecord[]> {
+    // One round-trip: graph row + counts via lateral correlated subquery.
+    // Plain prisma.graph.findMany + per-row count would be N+1.
+    const rows = await prisma.$queryRaw<
+      Array<{
+        graph_id: string;
+        graph_name: string;
+        graph_type: string;
+        subject: string | null;
+        course_name: string | null;
+        description: string | null;
+        status: string;
+        created_by: string | null;
+        created_at: Date;
+        updated_at: Date;
+        node_count: bigint;
+        relation_count: bigint;
+      }>
+    >`
+      SELECT g.graph_id, g.graph_name, g.graph_type, g.subject, g.course_name,
+             g.description, g.status, g.created_by, g.created_at, g.updated_at,
+             COALESCE(nc.cnt, 0)::bigint AS node_count,
+             COALESCE(rc.cnt, 0)::bigint AS relation_count
+      FROM graphs g
+      LEFT JOIN (SELECT graph_id, COUNT(*) AS cnt FROM nodes GROUP BY graph_id) nc
+        ON nc.graph_id = g.graph_id
+      LEFT JOIN (SELECT graph_id, COUNT(*) AS cnt FROM relations GROUP BY graph_id) rc
+        ON rc.graph_id = g.graph_id
+      ORDER BY g.created_at DESC
+    `;
+    return rows.map((r) =>
+      toGraphRecord(r, Number(r.node_count), Number(r.relation_count)),
+    );
+  },
+
+  async findById(graph_id: string): Promise<GraphDetail | null> {
+    const g = await prisma.graph.findUnique({ where: { graph_id } });
+    if (!g) return null;
+    const [nodes, relations] = await Promise.all([
+      prisma.node.findMany({
+        where: { graph_id },
+        orderBy: { created_at: 'asc' },
+      }),
+      prisma.relation.findMany({
+        where: { graph_id },
+        orderBy: { created_at: 'asc' },
+      }),
+    ]);
+    return {
+      graph: toGraphRecord(g, nodes.length, relations.length),
+      nodes: nodes.map(toPlainNode),
+      relations: relations.map(toPlainRelation),
+    };
+  },
+
+  async update(
+    graph_id: string,
+    patch: UpdateGraphInput,
+  ): Promise<GraphRecord | null> {
+    // Drop `undefined` so Prisma does not interpret them as "set to null".
+    const data: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) data[k] = v;
+    }
+    // No-op patch returns current state with counts (matches Cypher path).
+    if (Object.keys(data).length === 0) {
+      const detail = await GraphServicePg.findById(graph_id);
+      return detail?.graph ?? null;
+    }
+    try {
+      await prisma.graph.update({ where: { graph_id }, data });
+    } catch (err) {
+      // Prisma throws P2025 when the row is missing — return null per contract.
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code?: string }).code === 'P2025'
+      ) {
+        return null;
+      }
+      throw err;
+    }
+    const detail = await GraphServicePg.findById(graph_id);
+    return detail?.graph ?? null;
+  },
+
+  async remove(graph_id: string): Promise<boolean> {
+    // FK has ON DELETE CASCADE for nodes & relations, so a single delete
+    // tears down the whole subtree. Catch P2025 to mirror the boolean return.
+    try {
+      await prisma.graph.delete({ where: { graph_id } });
+      return true;
+    } catch (err) {
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code?: string }).code === 'P2025'
+      ) {
+        return false;
+      }
+      throw err;
+    }
+  },
+
+  async exportToJson(graph_id: string): Promise<GraphDetail | null> {
+    return GraphServicePg.findById(graph_id);
+  },
+};
+
+/**
+ * Reshape a Prisma `Node` row into the loose `Record<string, unknown>` shape
+ * the routes return. Drops nulls (matches Cypher), serializes timestamps to
+ * ISO strings, and strips the `embedding` column (binary, never sent over
+ * the wire — Pack C uses it server-side only).
+ */
+function toPlainNode(n: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(n)) {
+    if (k === 'embedding') continue;
+    if (v === null) continue;
+    if (v instanceof Date) {
+      out[k] = v.toISOString();
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Reshape a Prisma `Relation` row to match the legacy Neo4j contract:
+ * - `relation_id` is a numeric string (BigInt → String).
+ * - timestamps as ISO strings.
+ * - nulls dropped.
+ */
+function toPlainRelation(r: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(r)) {
+    if (v === null) continue;
+    if (k === 'relation_id') {
+      out[k] = typeof v === 'bigint' ? v.toString() : String(v);
+    } else if (v instanceof Date) {
+      out[k] = v.toISOString();
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Public proxy — picks an implementation per call so tests that toggle
+// STORAGE_BACKEND between cases see the right backend without a process
+// restart. All public method signatures are identical to the legacy export.
+// ---------------------------------------------------------------------------
+
+function impl() {
+  return getStorageBackend() === 'pg' ? GraphServicePg : GraphServiceNeo4j;
+}
+
+export const GraphService = {
+  create: (input: CreateGraphInput) => impl().create(input),
+  list: () => impl().list(),
+  findById: (graph_id: string) => impl().findById(graph_id),
+  update: (graph_id: string, patch: UpdateGraphInput) =>
+    impl().update(graph_id, patch),
+  remove: (graph_id: string) => impl().remove(graph_id),
+  exportToJson: (graph_id: string) => impl().exportToJson(graph_id),
 };
