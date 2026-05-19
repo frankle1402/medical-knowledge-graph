@@ -107,4 +107,38 @@ describe('GraphEditorPage', () => {
     );
     expect(await screen.findByRole('alert')).toHaveTextContent('图谱不存在');
   });
+
+  it('renders the synonym-merge entry button in the header', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(sampleGraph), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    renderWithProviders(
+      <Routes>
+        <Route path="/graphs/:id" element={<GraphEditorPage />} />
+      </Routes>,
+      { route: '/graphs/graph_one' },
+    );
+    await screen.findByText('生理学');
+    expect(screen.getByTestId('open-synonym-merge-btn')).toBeInTheDocument();
+  });
+
+  it('passes graphId to NodeSearchBox so the semantic button shows', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(sampleGraph), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    renderWithProviders(
+      <Routes>
+        <Route path="/graphs/:id" element={<GraphEditorPage />} />
+      </Routes>,
+      { route: '/graphs/graph_one' },
+    );
+    await screen.findByText('生理学');
+    expect(screen.getByTestId('semantic-search-btn')).toBeInTheDocument();
+  });
 });

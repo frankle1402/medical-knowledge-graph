@@ -11,9 +11,11 @@ import type {
 } from '@mkg/shared';
 import { aiApi, graphsApi, nodesApi, relationsApi, templatesApi } from '../api';
 import { GraphCanvas } from '../components/GraphEditor/GraphCanvas';
+import { LearningPathPanel } from '../components/GraphEditor/LearningPathPanel';
 import { NodeForm } from '../components/GraphEditor/NodeForm';
 import { NodeSearchBox } from '../components/GraphEditor/NodeSearchBox';
 import { RelationForm } from '../components/GraphEditor/RelationForm';
+import { SynonymMergePanel } from '../components/GraphEditor/SynonymMergePanel';
 import { NodePanel } from '../components/NodePanel';
 import { ReviewPanel } from '../components/ReviewPanel';
 import { Button, Modal, Toaster, toast } from '../components/ui';
@@ -54,6 +56,9 @@ export function GraphEditorPage() {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  // RAG / learning panels
+  const [learningPathNodeId, setLearningPathNodeId] = useState<string | null>(null);
+  const [synonymPanelOpen, setSynonymPanelOpen] = useState(false);
 
   // Focus mode: subset of nodes whose 1-hop neighborhood stays bright; rest are
   // dimmed. First entry = the user-picked center; subsequent entries come from
@@ -227,6 +232,13 @@ export function GraphEditorPage() {
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            variant="secondary"
+            onClick={() => setSynonymPanelOpen(true)}
+            data-testid="open-synonym-merge-btn"
+          >
+            🔗 同义词合并
+          </Button>
           <Button onClick={() => setGenerateOpen(true)}>AI 生成图谱</Button>
         </div>
       </header>
@@ -242,7 +254,7 @@ export function GraphEditorPage() {
         }}
       >
         <h3 style={{ marginTop: 0, fontSize: 13, color: '#111827' }}>工具</h3>
-        <NodeSearchBox nodes={nodes} onSelect={handleEnterFocus} />
+        <NodeSearchBox nodes={nodes} onSelect={handleEnterFocus} graphId={graphId} />
         <Button
           variant="secondary"
           size="sm"
@@ -302,8 +314,36 @@ export function GraphEditorPage() {
           onDelete={() => selectedNode && handleDeleteNode(selectedNode.node_id)}
           onDeleteRelation={handleDeleteRelation}
           onFocusNode={handleEnterFocus}
+          onShowLearningPath={(nodeId) => setLearningPathNodeId(nodeId)}
         />
       </aside>
+
+      <LearningPathPanel
+        nodeId={learningPathNodeId}
+        onClose={() => setLearningPathNodeId(null)}
+        onJumpToNode={(nodeId) => {
+          setLearningPathNodeId(null);
+          handleEnterFocus(nodeId);
+          selectNode(nodeId);
+        }}
+      />
+
+      <SynonymMergePanel
+        open={synonymPanelOpen}
+        graphId={graphId}
+        relations={relations}
+        onClose={() => setSynonymPanelOpen(false)}
+        onMerged={() => {
+          // Re-sync from server: nodes/relations may have moved or vanished.
+          graphsApi.get(graphId).then((detail) => {
+            setGraph(detail.graph);
+            setNodes(detail.nodes);
+            setRelations(detail.relations);
+          }).catch((err) => {
+            toast.error(err instanceof Error ? err.message : '刷新图谱失败');
+          });
+        }}
+      />
 
       <Modal
         open={createNodeOpen}
