@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { prisma } from '../../../lib/prisma';
-import { LearningService } from '../learning.service';
+import { LearningService, EmbeddingsNotReadyError } from '../learning.service';
 
 /**
  * These tests assume STORAGE_BACKEND=pg (the vitest default). The
@@ -257,5 +257,138 @@ describe('LearningService.knowledgeGap', () => {
       targets: ['D'],
     });
     expect(gaps.find((g) => g.node_id === 'I')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Synonym candidates
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a 1536-dim vector literal in pgvector's text format. Values are
+ * filled into the first `presetValues.length` slots; the remainder is
+ * zero-padded so the vector matches the schema's `vector(1536)` type.
+ */
+function vectorLiteral(presetValues: number[]): string {
+  const dim = 1536;
+  const arr = new Array(dim).fill(0);
+  for (let i = 0; i < presetValues.length && i < dim; i++) {
+    arr[i] = presetValues[i];
+  }
+  // Normalize so cosine distance behaves like 1 - cosine similarity.
+  const norm = Math.sqrt(arr.reduce((s, v) => s + v * v, 0));
+  if (norm > 0) for (let i = 0; i < dim; i++) arr[i] = arr[i] / norm;
+  return `[${arr.join(',')}]`;
+}
+
+async function setEmbedding(node_id: string, vec: number[]): Promise<void> {
+  const lit = vectorLiteral(vec);
+  await prisma.$executeRawUnsafe(
+    `UPDATE nodes SET embedding = $1::vector WHERE node_id = $2`,
+    lit,
+    node_id,
+  );
+}
+
+describe('LearningService.synonymCandidates', () => {
+  beforeEach(async () => {
+    await prisma.graph.create({
+      data: { graph_id: 'G1', graph_name: 't', graph_type: 'curriculum' },
+    });
+    await prisma.graph.create({
+      data: { graph_id: 'G2', graph_name: 't2', graph_type: 'curriculum' },
+    });
+    for (const id of ['N1', 'N2', 'N3', 'N4']) {
+      await prisma.node.create({
+        data: {
+          node_id: id,
+          graph_id: 'G1',
+          node_type: 'knowledge_point',
+          name: `name-${id}`,
+        },
+      });
+    }
+    await prisma.node.create({
+      data: {
+        node_id: 'X1',
+        graph_id: 'G2',
+        node_type: 'knowledge_point',
+        name: 'name-X1',
+      },
+    });
+    await prisma.node.create({
+      data: {
+        node_id: 'X2',
+        graph_id: 'G2',
+        node_type: 'knowledge_point',
+        name: 'name-X2',
+      },
+    });
+  });
+
+  it('throws EmbeddingsNotReadyError when no node is embedded', async () => {
+    await expect(
+      LearningService.synonymCandidates('G1', { threshold: 0.92 }),
+    ).rejects.toBeInstanceOf(EmbeddingsNotReadyError);
+  });
+
+  it('returns pairs above threshold, ordered by similarity DESC', async () => {
+    // N1, N2 are nearly identical (high cosine similarity).
+    // N3 is also similar to N1 but less so.
+    // N4 is orthogonal — should be filtered out.
+    await setEmbedding('N1', [1, 0.01, 0]);
+    await setEmbedding('N2', [1, 0.02, 0]);
+    await setEmbedding('N3', [1, 0.4, 0]);
+    await setEmbedding('N4', [0, 0, 1]);
+
+    const out = await LearningService.synonymCandidates('G1', { threshold: 0.92 });
+    // N1/N2 must appear; N4 must not appear paired with N1.
+    const pairKeys = out.map((p) => `${p.a.node_id}-${p.b.node_id}`).sort();
+    expect(pairKeys).toContain('N1-N2');
+    expect(pairKeys.find((k) => k.includes('N4'))).toBeUndefined();
+    // Closest pair first — N1/N2 should be at index 0
+    expect(out[0]?.a.node_id).toBe('N1');
+    expect(out[0]?.b.node_id).toBe('N2');
+    expect(out[0]?.score).toBeGreaterThan(0.92);
+  });
+
+  it('respects threshold: stricter threshold drops borderline pairs', async () => {
+    await setEmbedding('N1', [1, 0.01, 0]);
+    await setEmbedding('N2', [1, 0.02, 0]);
+    await setEmbedding('N3', [1, 0.4, 0]);
+    await setEmbedding('N4', [0, 0, 1]);
+
+    const lax = await LearningService.synonymCandidates('G1', { threshold: 0.85 });
+    const strict = await LearningService.synonymCandidates('G1', { threshold: 0.99 });
+    expect(lax.length).toBeGreaterThanOrEqual(strict.length);
+    // Strict 0.99 should still keep N1/N2 (they're effectively identical) but
+    // drop N1/N3 etc.
+    expect(strict.every((p) => p.score >= 0.99)).toBe(true);
+  });
+
+  it('does not return pairs across graphs', async () => {
+    await setEmbedding('N1', [1, 0, 0]);
+    await setEmbedding('N2', [1, 0.005, 0]);
+    await setEmbedding('X1', [1, 0.005, 0]);
+    await setEmbedding('X2', [1, 0.01, 0]);
+
+    const g1 = await LearningService.synonymCandidates('G1', { threshold: 0.9 });
+    expect(
+      g1.every(
+        (p) =>
+          p.a.node_id.startsWith('N') && p.b.node_id.startsWith('N'),
+      ),
+    ).toBe(true);
+  });
+
+  it('dedupes (a,b) and (b,a) into a single canonically-ordered pair', async () => {
+    await setEmbedding('N1', [1, 0, 0]);
+    await setEmbedding('N2', [1, 0.005, 0]);
+
+    const out = await LearningService.synonymCandidates('G1', { threshold: 0.9 });
+    const pairs = out.map((p) => `${p.a.node_id}-${p.b.node_id}`);
+    expect(pairs).toEqual(['N1-N2']);
+    // No reverse pair
+    expect(pairs).not.toContain('N2-N1');
   });
 });

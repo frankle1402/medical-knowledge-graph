@@ -176,7 +176,101 @@ async function knowledgeGap(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Task 3: Synonym candidates (pgvector cosine)
+// ---------------------------------------------------------------------------
+
+export const SynonymQuery = z.object({
+  threshold: z.coerce.number().min(0.85).max(0.99).default(0.92),
+});
+export type SynonymQueryT = z.infer<typeof SynonymQuery>;
+
+export interface SynonymCandidate {
+  a: { node_id: string; name: string };
+  b: { node_id: string; name: string };
+  score: number;
+}
+
+/**
+ * Signaled by the route layer with HTTP 503 — the API is still wired up
+ * but cannot answer until Pack C's embedding backfill has populated the
+ * `embedding` column for at least one pair of nodes in this graph.
+ */
+export class EmbeddingsNotReadyError extends Error {
+  status = 503;
+  code = 'embeddings_not_ready';
+  constructor(public graph_id: string) {
+    super(`embeddings not yet populated for graph ${graph_id}`);
+  }
+}
+
+/**
+ * Find pairs of nodes within the same graph whose embedding cosine
+ * similarity meets or exceeds `threshold`. Pairs are deduped via the
+ * canonical ordering `n1.node_id < n2.node_id` (string comparison) so
+ * (a, b) and (b, a) collapse into one row. Capped at 50 results, sorted
+ * by ascending distance (closest pairs first).
+ *
+ * pgvector's `<=>` operator returns cosine *distance* in [0, 2]. For
+ * unit-normalized embeddings — which is the convention for OpenAI /
+ * BGE-style models Pack C wires up — distance equals 1 - cosine
+ * similarity, so `dist <= 1 - threshold` selects pairs at or above
+ * the threshold and `score = 1 - dist` recovers the similarity.
+ *
+ * If no node in the graph has an embedding the API responds 503 to
+ * tell the caller "rerun the backfill" rather than silently empty.
+ */
+async function synonymCandidates(
+  graph_id: string,
+  q: SynonymQueryT,
+): Promise<SynonymCandidate[]> {
+  // Guard: if the graph has zero embedded nodes, treat as not ready.
+  // We don't require ALL nodes to be embedded (partial coverage is
+  // useful) — just that at least one pair could be evaluated.
+  const counts = await prisma.$queryRaw<Array<{ embedded: bigint }>>`
+    SELECT COUNT(*)::bigint AS embedded
+    FROM nodes
+    WHERE graph_id = ${graph_id} AND embedding IS NOT NULL
+  `;
+  if (Number(counts[0]?.embedded ?? 0) < 2) {
+    throw new EmbeddingsNotReadyError(graph_id);
+  }
+
+  const cosineDistanceCap = 1 - q.threshold;
+
+  const rows = await prisma.$queryRaw<
+    Array<{
+      a_id: string;
+      a_name: string;
+      b_id: string;
+      b_name: string;
+      dist: number;
+    }>
+  >`
+    SELECT
+      n1.node_id AS a_id, n1.name AS a_name,
+      n2.node_id AS b_id, n2.name AS b_name,
+      (n1.embedding <=> n2.embedding) AS dist
+    FROM nodes n1
+    JOIN nodes n2 ON n1.graph_id = n2.graph_id
+                  AND n1.node_id < n2.node_id
+    WHERE n1.graph_id = ${graph_id}
+      AND n1.embedding IS NOT NULL
+      AND n2.embedding IS NOT NULL
+      AND (n1.embedding <=> n2.embedding) <= ${cosineDistanceCap}
+    ORDER BY dist ASC
+    LIMIT 50
+  `;
+
+  return rows.map((r) => ({
+    a: { node_id: r.a_id, name: r.a_name },
+    b: { node_id: r.b_id, name: r.b_name },
+    score: Number((1 - r.dist).toFixed(4)),
+  }));
+}
+
 export const LearningService = {
   learningPath,
   knowledgeGap,
+  synonymCandidates,
 };
