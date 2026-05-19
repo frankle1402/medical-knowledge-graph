@@ -11,7 +11,7 @@ async function seedChain(): Promise<void> {
   await prisma.graph.create({
     data: { graph_id: 'G1', graph_name: 'test', graph_type: 'curriculum' },
   });
-  // Build chain: A → B → C → D ('前置' edges)
+  // Build chain: A → B → C → D ('PREREQUISITE_OF' edges)
   for (const id of ['A', 'B', 'C', 'D']) {
     await prisma.node.create({
       data: {
@@ -32,7 +32,7 @@ async function seedChain(): Promise<void> {
         graph_id: 'G1',
         source_id: s as string,
         target_id: t as string,
-        relation_type: '前置',
+        relation_type: 'PREREQUISITE_OF',
       },
     });
   }
@@ -50,7 +50,7 @@ describe('LearningService.learningPath', () => {
     // A is deepest (depth 3), C is closest (depth 1)
     expect(r?.path[0]?.depth).toBe(3);
     expect(r?.path[2]?.depth).toBe(1);
-    expect(r?.path[0]?.via).toBe('前置');
+    expect(r?.path[0]?.via).toBe('PREREQUISITE_OF');
   });
 
   it('respects depth limit', async () => {
@@ -83,7 +83,7 @@ describe('LearningService.learningPath', () => {
         graph_id: 'G1',
         source_id: 'E',
         target_id: 'D',
-        relation_type: '前置',
+        relation_type: 'PREREQUISITE_OF',
         status: 'pending',
       },
     });
@@ -119,7 +119,7 @@ describe('LearningService.learningPath', () => {
         graph_id: 'G1',
         source_id: 'D',
         target_id: 'A',
-        relation_type: '前置',
+        relation_type: 'PREREQUISITE_OF',
       },
     });
     const r = await LearningService.learningPath('D', { depth: 10 });
@@ -163,12 +163,12 @@ describe('LearningService.knowledgeGap', () => {
       });
     }
     const edges: Array<[string, string, string, string]> = [
-      ['A', 'B', '前置', 'G1'],
-      ['B', 'C', '前置', 'G1'],
-      ['C', 'D', '前置', 'G1'],
-      ['E', 'D', '前置', 'G1'],
-      ['F', 'C', '前置', 'G1'],
-      ['G', 'H', '前置', 'G2'],
+      ['A', 'B', 'PREREQUISITE_OF', 'G1'],
+      ['B', 'C', 'PREREQUISITE_OF', 'G1'],
+      ['C', 'D', 'PREREQUISITE_OF', 'G1'],
+      ['E', 'D', 'PREREQUISITE_OF', 'G1'],
+      ['F', 'C', 'PREREQUISITE_OF', 'G1'],
+      ['G', 'H', 'PREREQUISITE_OF', 'G2'],
     ];
     for (const [s, t, type, gid] of edges) {
       await prisma.relation.create({
@@ -248,7 +248,7 @@ describe('LearningService.knowledgeGap', () => {
         graph_id: 'G1',
         source_id: 'I',
         target_id: 'D',
-        relation_type: '前置',
+        relation_type: 'PREREQUISITE_OF',
         status: 'pending',
       },
     });

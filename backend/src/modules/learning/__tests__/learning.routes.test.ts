@@ -45,7 +45,7 @@ async function seedChain(): Promise<void> {
         graph_id: 'G1',
         source_id: s as string,
         target_id: t as string,
-        relation_type: '前置',
+        relation_type: 'PREREQUISITE_OF',
       },
     });
   }
@@ -81,7 +81,7 @@ describe('learning routes', () => {
       node_id: 'A',
       name: 'A',
       depth: 3,
-      via: '前置',
+      via: 'PREREQUISITE_OF',
     });
   });
 

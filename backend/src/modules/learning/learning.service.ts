@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 
 // ---------------------------------------------------------------------------
-// Task 1: Learning path (recursive CTE over '前置' relations)
+// Task 1: Learning path (recursive CTE over 'PREREQUISITE_OF' relations)
 // ---------------------------------------------------------------------------
 
 export const LearningPathQuery = z.object({
@@ -23,9 +23,9 @@ export interface LearningPath {
 }
 
 /**
- * Walk backward from `node_id` along `relation_type='前置'` edges.
+ * Walk backward from `node_id` along `relation_type='PREREQUISITE_OF'` edges.
  *
- * Edge semantics: `A --前置--> B` means "A must be learned before B" (A is
+ * Edge semantics: `A --PREREQUISITE_OF--> B` means "A must be learned before B" (A is
  * a prerequisite of B). To produce a study order for B we walk from B
  * toward its sources (target_id = B → source_id = A), repeating up to
  * `q.depth` hops. Each hop reduces the `depth` field meaning "how far
@@ -57,7 +57,7 @@ async function learningPath(
       FROM relations r
       JOIN nodes n ON n.node_id = r.source_id
       WHERE r.target_id = ${node_id}
-        AND r.relation_type = '前置'
+        AND r.relation_type = 'PREREQUISITE_OF'
         AND r.status = 'approved'
 
       UNION
@@ -66,7 +66,7 @@ async function learningPath(
       FROM prereqs p
       JOIN relations r ON r.target_id = p.node_id
       JOIN nodes n ON n.node_id = r.source_id
-      WHERE r.relation_type = '前置'
+      WHERE r.relation_type = 'PREREQUISITE_OF'
         AND r.status = 'approved'
         AND p.depth < ${q.depth}::int
     )
@@ -101,7 +101,7 @@ export interface KnowledgeGapResult {
 }
 
 /**
- * For each target in `targets`, walk back along `relation_type='前置'` to
+ * For each target in `targets`, walk back along `relation_type='PREREQUISITE_OF'` to
  * collect every ancestor (transitively required prereq). Subtract the
  * `mastered` set. The remaining nodes are the student's knowledge gaps;
  * each is annotated with `blocking` = the targets they unblock.
@@ -133,7 +133,7 @@ async function knowledgeGap(
       JOIN nodes n ON n.node_id = r.source_id
       WHERE r.target_id = ANY(${input.targets}::text[])
         AND r.graph_id = ${graph_id}
-        AND r.relation_type = '前置'
+        AND r.relation_type = 'PREREQUISITE_OF'
         AND r.status = 'approved'
 
       UNION
@@ -142,7 +142,7 @@ async function knowledgeGap(
       FROM prereqs p
       JOIN relations r ON r.target_id = p.node_id
       JOIN nodes n ON n.node_id = r.source_id
-      WHERE r.relation_type = '前置'
+      WHERE r.relation_type = 'PREREQUISITE_OF'
         AND r.status = 'approved'
         AND r.graph_id = ${graph_id}
         AND p.depth < 10
