@@ -128,3 +128,134 @@ describe('LearningService.learningPath', () => {
     expect(ids).toEqual(['A', 'B', 'C', 'D']);
   });
 });
+
+describe('LearningService.knowledgeGap', () => {
+  beforeEach(async () => {
+    // Two graphs of prereqs:
+    //   A → B → C → D
+    //   E → D
+    //   F → C   (only relevant to target C)
+    //   G → H is in a different graph (G2) — must be excluded
+    await prisma.graph.create({
+      data: { graph_id: 'G1', graph_name: 't', graph_type: 'curriculum' },
+    });
+    await prisma.graph.create({
+      data: { graph_id: 'G2', graph_name: 't2', graph_type: 'curriculum' },
+    });
+    for (const id of ['A', 'B', 'C', 'D', 'E', 'F']) {
+      await prisma.node.create({
+        data: {
+          node_id: id,
+          graph_id: 'G1',
+          node_type: 'knowledge_point',
+          name: id,
+        },
+      });
+    }
+    for (const id of ['G', 'H']) {
+      await prisma.node.create({
+        data: {
+          node_id: id,
+          graph_id: 'G2',
+          node_type: 'knowledge_point',
+          name: id,
+        },
+      });
+    }
+    const edges: Array<[string, string, string, string]> = [
+      ['A', 'B', '前置', 'G1'],
+      ['B', 'C', '前置', 'G1'],
+      ['C', 'D', '前置', 'G1'],
+      ['E', 'D', '前置', 'G1'],
+      ['F', 'C', '前置', 'G1'],
+      ['G', 'H', '前置', 'G2'],
+    ];
+    for (const [s, t, type, gid] of edges) {
+      await prisma.relation.create({
+        data: { graph_id: gid, source_id: s, target_id: t, relation_type: type },
+      });
+    }
+  });
+
+  it('returns all ancestors of target D when nothing is mastered', async () => {
+    const { gaps } = await LearningService.knowledgeGap('G1', {
+      mastered: [],
+      targets: ['D'],
+    });
+    expect(gaps.map((g) => g.node_id)).toEqual(['A', 'B', 'C', 'E', 'F']);
+    // Every gap blocks the requested target D
+    for (const g of gaps) expect(g.blocking).toEqual(['D']);
+  });
+
+  it('removes mastered nodes from the gap set', async () => {
+    const { gaps } = await LearningService.knowledgeGap('G1', {
+      mastered: ['A', 'F'],
+      targets: ['D'],
+    });
+    expect(gaps.map((g) => g.node_id)).toEqual(['B', 'C', 'E']);
+  });
+
+  it('aggregates blocking targets when one node blocks several', async () => {
+    // C is required for D directly. C is itself the target → C should not
+    // appear as a gap for itself, but B (prereq of C) blocks both C and D.
+    const { gaps } = await LearningService.knowledgeGap('G1', {
+      mastered: [],
+      targets: ['C', 'D'],
+    });
+    const b = gaps.find((g) => g.node_id === 'B');
+    expect(b?.blocking).toEqual(['C', 'D']);
+    const a = gaps.find((g) => g.node_id === 'A');
+    // A is a prereq of B which is a prereq of C and D, so A blocks both
+    expect(a?.blocking).toEqual(['C', 'D']);
+  });
+
+  it('returns empty gaps when student has mastered everything required', async () => {
+    const { gaps } = await LearningService.knowledgeGap('G1', {
+      mastered: ['A', 'B', 'C', 'E', 'F'],
+      targets: ['D'],
+    });
+    expect(gaps).toEqual([]);
+  });
+
+  it('does not leak relations from other graphs', async () => {
+    // G2 has G → H. Asking for H in G2 should not see G1 nodes — and
+    // asking for D in G1 should not see G/H.
+    const r1 = await LearningService.knowledgeGap('G2', {
+      mastered: [],
+      targets: ['H'],
+    });
+    expect(r1.gaps.map((g) => g.node_id)).toEqual(['G']);
+
+    const r2 = await LearningService.knowledgeGap('G1', {
+      mastered: [],
+      targets: ['D'],
+    });
+    expect(r2.gaps.find((g) => g.node_id === 'G')).toBeUndefined();
+  });
+
+  it('skips non-approved prereq edges', async () => {
+    // Add I → D as 'pending'. Should not appear as a gap.
+    await prisma.node.create({
+      data: {
+        node_id: 'I',
+        graph_id: 'G1',
+        node_type: 'knowledge_point',
+        name: 'I',
+      },
+    });
+    await prisma.relation.create({
+      data: {
+        graph_id: 'G1',
+        source_id: 'I',
+        target_id: 'D',
+        relation_type: '前置',
+        status: 'pending',
+      },
+    });
+    const { gaps } = await LearningService.knowledgeGap('G1', {
+      mastered: [],
+      targets: ['D'],
+    });
+    expect(gaps.find((g) => g.node_id === 'I')).toBeUndefined();
+  });
+});
