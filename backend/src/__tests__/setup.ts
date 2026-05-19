@@ -8,6 +8,11 @@ let neo4jCleanupAvailable: boolean | null = null;
 // Each test file starts with a clean slate, except for migration metadata.
 // Order matters: child tables before parent.
 //
+// Postgres cleanup uses TRUNCATE ... RESTART IDENTITY CASCADE to wipe
+// graphs / nodes / relations between cases (CASCADE handles FK chains and
+// RESTART IDENTITY resets the BIGSERIAL relation_id so tests can rely on
+// freshly low ids per case).
+//
 // Neo4j cleanup uses MATCH ... DETACH DELETE on the test database. If the
 // local Neo4j Community edition does not support multiple databases, the
 // driver falls back to the default db; isolation then relies on graph_id /
@@ -17,7 +22,13 @@ beforeEach(async () => {
   await prisma.promptTemplate.deleteMany();
   await prisma.user.deleteMany();
 
-  // Clean every Graph + Node + dangling relation in the test db.
+  // Pack B graph data lives in Postgres when STORAGE_BACKEND=pg. Always
+  // truncate so tests are independent regardless of the active backend.
+  await prisma.$executeRawUnsafe(
+    'TRUNCATE TABLE "relations", "nodes", "graphs" RESTART IDENTITY CASCADE',
+  );
+
+  // Clean every Graph + Node + dangling relation in the test Neo4j db.
   // DETACH DELETE removes attached relationships in a single statement.
   if (neo4jCleanupAvailable === false) return;
   try {
