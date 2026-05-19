@@ -13,7 +13,8 @@
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
     "neo4j:init": "tsx src/scripts/neo4j-init.ts",
-    "smoke:graph": "tsx src/scripts/smoke-graph.ts"
+    "smoke:graph": "tsx src/scripts/smoke-graph.ts",
+    "migrate:from-neo4j": "tsx src/scripts/migrate-from-neo4j.ts"
   },
   "dependencies": {
     "@mkg/shared": "*",
