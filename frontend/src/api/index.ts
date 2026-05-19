@@ -12,3 +12,18 @@ export {
   type LlmTestResult,
   type LlmTestPayload,
 } from './system';
+export {
+  searchApi,
+  type SearchMatch,
+  type SearchNode,
+  type SearchResponse,
+} from './search';
+export {
+  learningApi,
+  type LearningPathStep,
+  type LearningPathResponse,
+  type KnowledgeGap,
+  type KnowledgeGapResponse,
+  type SynonymCandidate,
+  type SynonymCandidatesResponse,
+} from './learning';
