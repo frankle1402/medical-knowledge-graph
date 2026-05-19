@@ -9,6 +9,7 @@ interface NodePanelProps {
   onDelete: () => void;
   onDeleteRelation: () => void;
   onFocusNode?: (nodeId: string) => void;
+  onShowLearningPath?: (nodeId: string) => void;
 }
 
 export function NodePanel({
@@ -18,6 +19,7 @@ export function NodePanel({
   onDelete,
   onDeleteRelation,
   onFocusNode,
+  onShowLearningPath,
 }: NodePanelProps) {
   if (selectedNode) {
     return (
@@ -47,6 +49,15 @@ export function NodePanel({
               data-testid="focus-node-btn"
             >
               🎯 只看这个
+            </Button>
+          ) : null}
+          {onShowLearningPath ? (
+            <Button
+              variant="secondary"
+              onClick={() => onShowLearningPath(selectedNode.node_id)}
+              data-testid="show-learning-path-btn"
+            >
+              📚 学习路径
             </Button>
           ) : null}
         </div>

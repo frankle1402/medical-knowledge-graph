@@ -76,4 +76,33 @@ describe('NodePanel', () => {
     await userEvent.click(screen.getByRole('button', { name: '删除关系' }));
     expect(onDeleteRelation).toHaveBeenCalled();
   });
+
+  it('does not render the learning-path button when handler is omitted', () => {
+    render(
+      <NodePanel
+        selectedNode={node}
+        selectedRelation={null}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onDeleteRelation={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId('show-learning-path-btn')).toBeNull();
+  });
+
+  it('renders the learning-path button and fires onShowLearningPath with node_id', async () => {
+    const onShow = vi.fn();
+    render(
+      <NodePanel
+        selectedNode={node}
+        selectedRelation={null}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onDeleteRelation={() => {}}
+        onShowLearningPath={onShow}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('show-learning-path-btn'));
+    expect(onShow).toHaveBeenCalledWith('KP_X');
+  });
 });
