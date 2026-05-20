@@ -14,11 +14,13 @@
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
+import { requirePgBackend } from '../../middleware/requirePgBackend.js';
 import { GraphService } from '../graphs/graph.service.js';
 import { SearchInput, SearchService } from './search.service.js';
 
 export const searchRouter: Router = Router();
 searchRouter.use(requireAuth);
+searchRouter.use(requirePgBackend);
 
 interface OpenAIErrorLike {
   status?: number;

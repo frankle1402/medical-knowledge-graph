@@ -53,7 +53,11 @@ export function NodeSearchBox({ nodes, onSelect, graphId }: NodeSearchBoxProps) 
       setOpen(true);
     } catch (err) {
       if (err instanceof ApiError && err.status === 503) {
-        toast.error('OpenAI 暂时不可用，请稍后再试');
+        if (err.code === 'pg_backend_required') {
+          toast.error('语义搜索需要 Postgres 后端（设置 STORAGE_BACKEND=pg 并重启）');
+        } else {
+          toast.error('OpenAI 暂时不可用，请稍后再试');
+        }
       } else {
         toast.error(err instanceof Error ? `语义搜索失败：${err.message}` : '语义搜索失败');
       }

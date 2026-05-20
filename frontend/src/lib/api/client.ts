@@ -65,10 +65,21 @@ async function parseError(res: Response): Promise<ApiError> {
   let message = `${res.status} ${res.statusText}`;
   let code: string | undefined;
   if (payload && typeof payload === 'object') {
-    const p = payload as { error?: { message?: string; code?: string }; message?: string };
-    if (p.error?.message) message = p.error.message;
-    else if (p.message) message = p.message;
-    if (p.error?.code) code = p.error.code;
+    const p = payload as {
+      error?: string | { message?: string; code?: string };
+      message?: string;
+    };
+    // Backend conventions vary: most routes return `{ error: 'string_code' }`,
+    // a few return `{ error: { code, message } }`. Surface `code` either way
+    // so callers can branch on it; leave `message` as the human/HTTP fallback
+    // unless an explicit message is provided.
+    if (typeof p.error === 'string') {
+      code = p.error;
+    } else if (p.error && typeof p.error === 'object') {
+      if (p.error.message) message = p.error.message;
+      if (p.error.code) code = p.error.code;
+    }
+    if (p.message) message = p.message;
   }
   // Surface Retry-After (RFC 7231) as seconds. Spec also allows HTTP-date,
   // but our backends only emit integer seconds; we ignore non-numeric values.

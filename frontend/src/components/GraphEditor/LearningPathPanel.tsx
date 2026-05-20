@@ -11,7 +11,7 @@ interface LearningPathPanelProps {
   onJumpToNode: (nodeId: string) => void;
 }
 
-type Phase = 'loading' | 'ready' | 'not_found' | 'error';
+type Phase = 'loading' | 'ready' | 'not_found' | 'pg_required' | 'error';
 
 /**
  * Right-side drawer that lists the prerequisite chain (PREREQUISITE_OF edges)
@@ -46,9 +46,15 @@ export function LearningPathPanel({ nodeId, onClose, onJumpToNode }: LearningPat
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        if (err instanceof ApiError && err.status === 404) {
-          setPhase('not_found');
-          return;
+        if (err instanceof ApiError) {
+          if (err.status === 404) {
+            setPhase('not_found');
+            return;
+          }
+          if (err.status === 503 && err.code === 'pg_backend_required') {
+            setPhase('pg_required');
+            return;
+          }
         }
         setErrorMsg(err instanceof Error ? err.message : '加载失败');
         setPhase('error');
@@ -83,6 +89,17 @@ export function LearningPathPanel({ nodeId, onClose, onJumpToNode }: LearningPat
         {phase === 'not_found' ? (
           <p style={{ color: '#6b7280', fontSize: 13 }} data-testid="learning-path-not-found">
             节点未找到（可能已被删除）。
+          </p>
+        ) : null}
+
+        {phase === 'pg_required' ? (
+          <p
+            style={{ color: '#6b7280', fontSize: 13, lineHeight: 1.6 }}
+            data-testid="learning-path-pg-required"
+          >
+            学习路径功能仅在 Postgres 后端下可用。
+            <br />
+            请在 <code>.env</code> 中设置 <code>STORAGE_BACKEND=pg</code> 并重启后端。
           </p>
         ) : null}
 

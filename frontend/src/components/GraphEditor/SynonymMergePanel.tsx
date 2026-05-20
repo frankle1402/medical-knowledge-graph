@@ -25,7 +25,7 @@ interface SynonymMergePanelProps {
   onMerged: () => void;
 }
 
-type Phase = 'idle' | 'loading' | 'ready' | 'embeddings_not_ready' | 'error';
+type Phase = 'idle' | 'loading' | 'ready' | 'embeddings_not_ready' | 'pg_required' | 'error';
 
 interface PendingMerge {
   candidate: SynonymCandidate;
@@ -86,6 +86,10 @@ export function SynonymMergePanel({
       .catch((err: unknown) => {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 503) {
+          if (err.code === 'pg_backend_required') {
+            setPhase('pg_required');
+            return;
+          }
           setPhase('embeddings_not_ready');
           return;
         }
@@ -198,6 +202,15 @@ export function SynonymMergePanel({
             <div data-testid="synonym-embeddings-not-ready" style={hintBoxStyle}>
               <p style={{ margin: 0, fontSize: 13 }}>
                 节点向量尚未就绪。请稍后重试，或联系管理员运行 embeddings 回填脚本。
+              </p>
+            </div>
+          ) : null}
+
+          {phase === 'pg_required' ? (
+            <div data-testid="synonym-pg-required" style={hintBoxStyle}>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+                同义词合并仅在 Postgres 后端下可用。请在 <code>.env</code> 中设置{' '}
+                <code>STORAGE_BACKEND=pg</code> 并重启后端。
               </p>
             </div>
           ) : null}

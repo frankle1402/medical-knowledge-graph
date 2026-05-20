@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
+import { requirePgBackend } from '../../middleware/requirePgBackend.js';
 import {
   KnowledgeGapInput,
   LearningPathQuery,
@@ -29,6 +30,7 @@ export const learningRoutes: Router = Router();
 learningRoutes.get(
   '/nodes/:node_id/learning-path',
   requireAuth,
+  requirePgBackend,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const q = LearningPathQuery.parse(req.query);
@@ -50,6 +52,7 @@ learningRoutes.get(
 learningRoutes.post(
   '/graphs/:graph_id/knowledge-gap',
   requireAuth,
+  requirePgBackend,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const body = KnowledgeGapInput.parse(req.body);
@@ -67,6 +70,7 @@ learningRoutes.post(
 learningRoutes.get(
   '/graphs/:graph_id/synonym-candidates',
   requireAuth,
+  requirePgBackend,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const q = SynonymQuery.parse(req.query);
