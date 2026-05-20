@@ -9,20 +9,27 @@
  * - Pack C tests mock the SDK directly via `vi.mock('openai', ...)`, so no
  *   real network calls happen in the suite.
  *
- * The same `LLM_API_KEY` / `LLM_BASE_URL` env values that drive chat work
- * for embeddings — same OpenAI key, different endpoint suffix.
+ * Config resolution mirrors the chat path: DB-backed `LlmConfig` first, falling
+ * back to `LLM_API_KEY` / `LLM_BASE_URL` env. We rebuild the SDK client when
+ * either value changes so admin updates from `/settings` take effect without
+ * a server restart.
  */
 import OpenAI from 'openai';
-import { env } from '../../config/env.js';
+import { getLlmConfig } from '../../modules/system/llm-config.service.js';
 
 let client: OpenAI | null = null;
+let lastKey: string | null = null;
+let lastBaseUrl: string | null = null;
 
-function getClient(): OpenAI {
-  if (!client) {
+async function getClient(): Promise<OpenAI> {
+  const cfg = await getLlmConfig();
+  if (!client || cfg.api_key !== lastKey || cfg.base_url !== lastBaseUrl) {
     client = new OpenAI({
-      apiKey: env.LLM_API_KEY,
-      baseURL: env.LLM_BASE_URL,
+      apiKey: cfg.api_key,
+      baseURL: cfg.base_url,
     });
+    lastKey = cfg.api_key;
+    lastBaseUrl = cfg.base_url;
   }
   return client;
 }
@@ -30,6 +37,8 @@ function getClient(): OpenAI {
 /** Reset the cached client. For tests only. */
 export function _resetClient(): void {
   client = null;
+  lastKey = null;
+  lastBaseUrl = null;
 }
 
 export const EMBEDDING_MODEL = 'text-embedding-3-small';
@@ -50,7 +59,7 @@ export async function embed(text: string): Promise<number[]> {
   if (!text || text.trim().length === 0) {
     throw new Error('embed(): empty text');
   }
-  const r = await getClient().embeddings.create({
+  const r = await (await getClient()).embeddings.create({
     model: EMBEDDING_MODEL,
     input: truncate(text),
   });
@@ -73,7 +82,7 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
       throw new Error('embedBatch(): empty text in batch');
     }
   }
-  const r = await getClient().embeddings.create({
+  const r = await (await getClient()).embeddings.create({
     model: EMBEDDING_MODEL,
     input: texts.map(truncate),
   });
