@@ -70,7 +70,15 @@ async function parseError(res: Response): Promise<ApiError> {
     else if (p.message) message = p.message;
     if (p.error?.code) code = p.error.code;
   }
-  return new ApiError(message, res.status, code, payload);
+  // Surface Retry-After (RFC 7231) as seconds. Spec also allows HTTP-date,
+  // but our backends only emit integer seconds; we ignore non-numeric values.
+  let retryAfter: number | undefined;
+  const ra = res.headers.get('Retry-After');
+  if (ra) {
+    const n = Number(ra);
+    if (Number.isFinite(n) && n >= 0) retryAfter = n;
+  }
+  return new ApiError(message, res.status, code, payload, retryAfter);
 }
 
 export async function request<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {

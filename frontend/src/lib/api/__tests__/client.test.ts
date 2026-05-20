@@ -109,4 +109,35 @@ describe('apiClient', () => {
     const out = await apiClient.delete('/api/x');
     expect(out).toBeUndefined();
   });
+
+  it('exposes Retry-After header on ApiError when present', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'rate-limited' } }), {
+        status: 503,
+        headers: { 'content-type': 'application/json', 'Retry-After': '7' },
+      }),
+    );
+    try {
+      await apiClient.get('/api/x');
+      expect.fail('should throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).retryAfter).toBe(7);
+    }
+  });
+
+  it('leaves retryAfter undefined when header missing or non-numeric', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'fail' } }), {
+        status: 503,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    try {
+      await apiClient.get('/api/x');
+      expect.fail('should throw');
+    } catch (err) {
+      expect((err as ApiError).retryAfter).toBeUndefined();
+    }
+  });
 });

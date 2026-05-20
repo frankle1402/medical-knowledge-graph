@@ -68,7 +68,7 @@ const RelationServiceCrudNeo4j = {
     const props = compact({
       description: input.description ?? null,
       confidence: input.confidence ?? 1,
-      status: 'approved',
+      status: input.status ?? 'approved',
       source: input.source ?? 'manual',
       ai_job_id: input.ai_job_id ?? null,
       created_at: new Date().toISOString(),
@@ -388,7 +388,7 @@ const RelationServicePg = {
         relation_type: relType,
         description: input.description ?? null,
         confidence: input.confidence ?? 1,
-        status: 'approved',
+        status: input.status ?? 'approved',
         ai_job_id: input.ai_job_id ?? null,
       },
     });
