@@ -16,8 +16,12 @@ import {
   whenIdle,
   getEmbeddingQueueStats,
   _resetQueue,
+  _queueSize,
+  _memoSize,
+  _MAX_QUEUE_SIZE,
 } from '../queue';
 import { EMBEDDING_DIM, _resetClient } from '../openai';
+import { logger } from '../../../lib/logger';
 
 const createMock = vi.fn();
 vi.mock('openai', () => ({
@@ -182,5 +186,59 @@ describe('embedding queue', () => {
     // First node has no embedding; second does.
     expect(await readEmbeddingDim(n1!.node_id as string)).toBeNull();
     expect(await readEmbeddingDim(n2!.node_id as string)).toBe(EMBEDDING_DIM);
+  });
+
+  it('caps the queue at MAX_QUEUE_SIZE and drops the oldest entry with a warning', async () => {
+    // Park the worker on the first embed so it can't drain while we fill the
+    // queue. The test asserts purely on in-memory state — no DB writes are
+    // issued (the worker awaits embed forever and never reaches the SQL).
+    createMock.mockImplementation(
+      () => new Promise(() => undefined) as Promise<never>,
+    );
+    const warnSpy = vi
+      .spyOn(logger, 'warn')
+      .mockImplementation((() => undefined) as never);
+
+    const N = _MAX_QUEUE_SIZE + 1;
+    for (let i = 0; i < N; i++) {
+      enqueueEmbedding({
+        node_id: `CAP_${i}`,
+        name: `n${i}`,
+        description: null,
+        tags: [],
+      });
+    }
+    // Yield once so the worker microtask runs and parks on the embed call.
+    await Promise.resolve();
+
+    expect(_queueSize()).toBeLessThanOrEqual(_MAX_QUEUE_SIZE);
+    // Exactly one drop event for one over-cap enqueue.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [arg] = warnSpy.mock.calls[0] as [{ dropped_node_id: string; queue_size: number }, string];
+    expect(arg.dropped_node_id).toBe('CAP_0');
+    expect(typeof arg.queue_size).toBe('number');
+
+    warnSpy.mockRestore();
+  });
+
+  it('whenIdle() resolves only after the last task completes', async () => {
+    // Empty queue: resolves synchronously.
+    await whenIdle();
+
+    const n = await NodeService.create(graphId, {
+      node_type: 'knowledge_point',
+      name: 'idle-test',
+      knowledge_type: '概念类',
+    } as never);
+    enqueueEmbedding({
+      node_id: n!.node_id as string,
+      name: n!.name as string,
+      description: null,
+      tags: [],
+    });
+    expect(_queueSize()).toBeGreaterThan(0);
+    await whenIdle();
+    expect(_queueSize()).toBe(0);
+    expect(getEmbeddingQueueStats().succeeded).toBeGreaterThanOrEqual(1);
   });
 });

@@ -26,6 +26,7 @@
  * - Order doesn't strictly matter; FIFO is fine.
  * - No external dependency, no persistence story to maintain.
  */
+import { logger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
 import { setNodeUpsertedHook } from '../../modules/nodes/node.service.js';
 import { embed, nodeEmbeddingText } from './openai.js';
@@ -34,6 +35,19 @@ interface Task {
   node_id: string;
   text: string;
 }
+
+/**
+ * Hard cap on in-memory queue + memo size. Without bounds, a runaway hook
+ * (or a long OpenAI outage) would let the queue grow with every node write
+ * for the lifetime of the process. 10k is far more than steady-state needs
+ * but lets short bursts ride out without dropping anything; over the cap we
+ * drop the oldest entry FIFO and log a warning. Failed nodes are still
+ * recoverable via `backfill-embeddings`.
+ */
+const MAX_QUEUE_SIZE = 10000;
+
+/** Exposed for tests that need to assert behavior at the cap. */
+export const _MAX_QUEUE_SIZE = MAX_QUEUE_SIZE;
 
 const queue: Task[] = [];
 const enqueued = new Set<string>();
@@ -81,6 +95,16 @@ export function _resetQueue(): void {
   inflightResolve = () => {};
 }
 
+/** Test helper: current pending queue length (exclusive of stats). */
+export function _queueSize(): number {
+  return queue.length;
+}
+
+/** Test helper: current memo size. */
+export function _memoSize(): number {
+  return lastEmbeddedText.size;
+}
+
 /**
  * Resolves the next time the queue drains to empty. Lets tests await
  * background processing without polling.
@@ -93,6 +117,10 @@ export function whenIdle(): Promise<void> {
 /**
  * Enqueue a node for embedding. Idempotent for an in-flight node_id; the
  * latest text wins if a re-enqueue arrives before the worker picks it up.
+ *
+ * Bounded by MAX_QUEUE_SIZE: when the queue is full, the oldest pending
+ * entry is dropped (and a warning logged) before the new one is added.
+ * Dropped nodes are recoverable via `backfill-embeddings`.
  */
 export function enqueueEmbedding(node: {
   node_id: string;
@@ -106,6 +134,17 @@ export function enqueueEmbedding(node: {
     const existing = queue.find((t) => t.node_id === node.node_id);
     if (existing) existing.text = text;
     return;
+  }
+  if (queue.length >= MAX_QUEUE_SIZE) {
+    const dropped = queue.shift();
+    if (dropped) {
+      enqueued.delete(dropped.node_id);
+      lastEmbeddedText.delete(dropped.node_id);
+      logger.warn(
+        { dropped_node_id: dropped.node_id, queue_size: queue.length },
+        'embedding queue full, dropping oldest entry',
+      );
+    }
   }
   queue.push({ node_id: node.node_id, text });
   enqueued.add(node.node_id);
@@ -123,6 +162,27 @@ function scheduleRun(): void {
   Promise.resolve().then(() => void run());
 }
 
+/**
+ * Record the last embedding text for a node, evicting the oldest entry
+ * (Map insertion order) if the memo is over MAX_QUEUE_SIZE. Without this
+ * cap the memo grows for the lifetime of the process — same risk as the
+ * unbounded queue, but slower-burning.
+ *
+ * Re-setting an existing key bumps insertion order so freshly written
+ * nodes are not the first to be evicted.
+ */
+function rememberEmbeddedText(node_id: string, text: string): void {
+  if (lastEmbeddedText.has(node_id)) {
+    lastEmbeddedText.delete(node_id);
+  }
+  lastEmbeddedText.set(node_id, text);
+  while (lastEmbeddedText.size > MAX_QUEUE_SIZE) {
+    const oldestKey = lastEmbeddedText.keys().next().value;
+    if (oldestKey === undefined) break;
+    lastEmbeddedText.delete(oldestKey);
+  }
+}
+
 async function run(): Promise<void> {
   try {
     while (queue.length > 0) {
@@ -135,13 +195,15 @@ async function run(): Promise<void> {
         // — only the cast `::vector` is part of the SQL fragment. Empty / NULL
         // node_id is impossible here; the hook filters those.
         await prisma.$executeRaw`UPDATE nodes SET embedding = ${literal}::vector WHERE node_id = ${task.node_id}`;
-        lastEmbeddedText.set(task.node_id, task.text);
+        rememberEmbeddedText(task.node_id, task.text);
         stats.succeeded += 1;
       } catch (err) {
         stats.failed += 1;
         // Best-effort: failed nodes will be picked up by backfill-embeddings.
-        // eslint-disable-next-line no-console
-        console.error('[embedding-queue] failed for', task.node_id, err);
+        logger.error(
+          { err, node_id: task.node_id },
+          'embedding job failed',
+        );
       }
     }
   } finally {
