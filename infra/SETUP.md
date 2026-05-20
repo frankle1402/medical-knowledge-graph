@@ -9,7 +9,7 @@ node -v   # v20.x
 npm -v    # 10.x
 ```
 
-## 2. PostgreSQL 16
+## 2. PostgreSQL 16 + pgvector
 
 下载 EnterpriseDB 的 Windows 安装包：
 <https://www.postgresql.org/download/windows/>
@@ -26,7 +26,29 @@ npm -v    # 10.x
 & "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -c "CREATE DATABASE knowledge_graph;"
 ```
 
-## 3. Neo4j 5 Community
+### 安装 pgvector 扩展
+
+Pack C 起 `nodes.embedding` 列依赖 [pgvector](https://github.com/pgvector/pgvector)。
+
+**Windows**：从 <https://github.com/pgvector/pgvector/releases> 下载与 PG 16 匹配的 `pgvector-x.y.z-windows-pg16.zip`，把 `vector.dll` 解压到 `C:\Program Files\PostgreSQL\16\lib\`、把 `vector.control` + `*.sql` 解压到 `C:\Program Files\PostgreSQL\16\share\extension\`。
+
+**Linux**：`sudo apt-get install postgresql-16-pgvector`（Debian/Ubuntu）
+
+**macOS**：`brew install pgvector`
+
+装好后在目标库里启用一次：
+
+```powershell
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -d knowledge_graph -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+`npm run db:migrate` 跑的 Prisma 迁移会假设这个扩展已经存在。
+
+## 3. Neo4j 5 Community（迁移期可选）
+
+`STORAGE_BACKEND=pg`（新默认）下，运行时不需要 Neo4j。仅在以下场景仍需要：
+- 临时回退到 `STORAGE_BACKEND=neo4j` 跑老路径
+- 跑 `npm run migrate:from-neo4j` 把老库数据搬到 PG
 
 推荐 Neo4j Desktop（带图形管理）：
 <https://neo4j.com/download/>
