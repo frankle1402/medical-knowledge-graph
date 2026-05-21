@@ -13,15 +13,20 @@ import {
 } from '../enums';
 
 describe('enums', () => {
-  it('NodeType 包含设计文档定义的 11 种类型', () => {
+  it('NodeType 包含设计文档定义的节点类型（v2 扩充后 16 种）', () => {
     expect(NodeType.options).toEqual([
       'textbook',
       'chapter',
       'section',
       'knowledge_point',
       'term',
+      'operation_process',
       'operation_step',
       'competency',
+      'risk',
+      'error',
+      'measure',
+      'assessment_item',
       'image',
       'table',
       'question',
@@ -66,5 +71,41 @@ describe('enums', () => {
 
   it('GraphType 四类型', () => {
     expect(GraphType.options).toEqual(['course', 'chapter', 'subject', 'custom']);
+  });
+});
+
+describe('v2 medical KG taxonomy', () => {
+  it.each([
+    'operation_process',
+    'risk',
+    'error',
+    'measure',
+    'assessment_item',
+  ])('NodeType accepts %s', (t) => {
+    expect(NodeType.parse(t)).toBe(t);
+  });
+
+  it.each([
+    'HAS_CHAPTER',
+    'HAS_SECTION',
+    'HAS_KNOWLEDGE_POINT',
+    'HAS_PROCESS',
+    'HAS_STEP',
+    'NEXT_STEP',
+    'HAS_RISK',
+    'HANDLED_BY',
+    'PREVENTED_BY',
+    'MANIFESTED_AS',
+    'COMMON_ERROR_OF',
+    'HAS_TERM',
+    'ALIAS_OF',
+    'ASSESSED_BY',
+  ])('RelationType accepts %s', (t) => {
+    expect(RelationType.parse(t)).toBe(t);
+  });
+
+  it('still rejects unknown types', () => {
+    expect(() => NodeType.parse('chunk_v2')).toThrow();
+    expect(() => RelationType.parse('FOO_BAR')).toThrow();
   });
 });

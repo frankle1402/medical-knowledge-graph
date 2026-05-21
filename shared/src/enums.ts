@@ -6,8 +6,13 @@ export const NodeType = z.enum([
   'section',
   'knowledge_point',
   'term',
+  'operation_process',
   'operation_step',
   'competency',
+  'risk',
+  'error',
+  'measure',
+  'assessment_item',
   'image',
   'table',
   'question',
@@ -41,9 +46,12 @@ export const CompetencyLevel = z.enum(['核心能力', '基础能力', '支持�
 export type CompetencyLevel = z.infer<typeof CompetencyLevel>;
 
 export const RelationType = z.enum([
-  // 层级
+  // 教材结构
   'CONTAINS',
   'BELONGS_TO',
+  'HAS_CHAPTER',
+  'HAS_SECTION',
+  'HAS_KNOWLEDGE_POINT',
   // 知识关系
   'PREREQUISITE_OF',
   'EASILY_CONFUSED_WITH',
@@ -56,8 +64,21 @@ export const RelationType = z.enum([
   // 术语
   'STANDARD_TERM_OF',
   'SYNONYM_OF',
+  'HAS_TERM',
+  'ALIAS_OF',
   // 能力
   'SUPPORTS_COMPETENCY',
+  'ASSESSED_BY',
+  // 操作流程
+  'HAS_PROCESS',
+  'HAS_STEP',
+  'NEXT_STEP',
+  // 风险/错误/处理
+  'HAS_RISK',
+  'COMMON_ERROR_OF',
+  'MANIFESTED_AS',
+  'HANDLED_BY',
+  'PREVENTED_BY',
   // 图谱归属
   'BELONGS_TO_GRAPH',
   'MERGED_INTO',
