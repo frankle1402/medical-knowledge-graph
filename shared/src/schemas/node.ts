@@ -149,7 +149,7 @@ export type ErrorNode = z.infer<typeof ErrorNode>;
 
 export const MeasureNode = BaseNode.extend({
   node_type: z.literal('measure'),
-  measure_type: z.enum(['handling', 'prevention', 'observation']).optional(),
+  measure_type: z.string().optional(),
 });
 export type MeasureNode = z.infer<typeof MeasureNode>;
 
