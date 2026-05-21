@@ -23,6 +23,11 @@ import {
 
 import { generateStructured } from './ai.llm.js';
 import { mapLLMOutput, type MappedCandidates } from './ai.mapper.js';
+import {
+  postprocess,
+  type PostprocessNode,
+  type PostprocessRelation,
+} from './postprocessor.js';
 import { renderPrompt } from './template.js';
 import type { VariableInput } from './variables.js';
 import type { RetryOptions } from '../../lib/llm/index.js';
@@ -196,6 +201,17 @@ export class AIJobOrchestrator {
 
       const mapped: MappedCandidates = mapLLMOutput(output);
 
+      // Postprocess: fill NEXT_STEP from step_order, dedup symmetric relations,
+      // warn on RELATED_TO overuse. Pure function; warnings flow into the
+      // ai_generation_logs.error_msg payload below (success status still).
+      const post = postprocess({
+        nodes: mapped.nodes as PostprocessNode[],
+        relations: mapped.relations as PostprocessRelation[],
+      });
+      const warningSuffix = post.warnings.length
+        ? `[postprocessor warnings]\n${post.warnings.join('\n')}`
+        : '';
+
       const defaults = {
         status: 'candidate' as const,
         source: 'ai_generated' as const,
@@ -204,12 +220,12 @@ export class AIJobOrchestrator {
 
       const createdNodes = await this.nodeService.bulkCreate(
         input.graphId,
-        mapped.nodes,
+        post.nodes,
         defaults,
       );
       const createdRelations = await this.relationService.bulkCreate(
         input.graphId,
-        mapped.relations,
+        post.relations,
         defaults,
       );
 
@@ -221,6 +237,7 @@ export class AIJobOrchestrator {
           llm_response: raw,
           nodes_created: createdNodes.length,
           relations_created: createdRelations.length,
+          error_msg: warningSuffix || null,
         },
       });
 

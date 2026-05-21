@@ -13,6 +13,11 @@
  * so the v2 prompts can emit rich metadata without a schema migration per
  * field. Legacy array-shaped tags are preserved under `tags._legacy` so the
  * existing fixtures keep working until Slice C normalizes them.
+ *
+ * Slice B mirrors the same trick on `relations`: extras like `reason`,
+ * `direction_explanation`, and `evidence` collapse into `relations.tags`
+ * (Phase 0 added the column) so the v2 prompts can attach justification to
+ * each edge without expanding the typed columns.
  */
 
 import type {
@@ -52,6 +57,23 @@ const NODE_DB_COLUMNS = new Set([
   'confidence',
   'tags',
   'ai_job_id',
+]);
+
+// Mirror of NODE_DB_COLUMNS for relations: the persisted columns on
+// `relations` plus the LLM passthroughs the service layer already understands.
+// Anything not in this set is collapsed into `tags` so v2 prompt extras
+// (`reason`, `direction_explanation`, `evidence`, ...) survive the bulk
+// upsert into `relations.tags` JSON column (added in Phase 0 Task 0.3).
+const RELATION_DB_COLUMNS = new Set([
+  'source_id',
+  'target_id',
+  'relation_type',
+  'description',
+  'confidence',
+  'status',
+  'source',
+  'ai_job_id',
+  'tags',
 ]);
 
 /**
@@ -108,15 +130,35 @@ export function mapLLMOutput(
         continue;
       }
     }
+
+    // Mirror the node loop: split known DB columns from LLM extras and route
+    // extras into `tags` so v2 prompts (reason / direction_explanation /
+    // evidence ...) reach `relations.tags` instead of being dropped at the
+    // service-layer boundary.
+    const known: Record<string, unknown> = {};
+    const extras: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(r)) {
+      if (v === undefined) continue;
+      if (k === 'tags') continue; // handled separately below
+      if (RELATION_DB_COLUMNS.has(k)) known[k] = v;
+      else extras[k] = v;
+    }
+
+    // Merge LLM-supplied tags with the extras bucket. We only honor object-
+    // shaped tags here; relations never had the legacy `string[]` form, so any
+    // non-object value is treated as missing rather than wrapped under
+    // `_legacy` (mirrors what `relation.service` accepts).
+    const baseTags =
+      r.tags && typeof r.tags === 'object' && !Array.isArray(r.tags)
+        ? (r.tags as Record<string, unknown>)
+        : {};
+
+    const tags = { ...baseTags, ...extras };
+
     const item: RelationCreateInput = {
-      source_id: r.source_id,
-      target_id: r.target_id,
-      relation_type: r.relation_type,
-      ...(r.description !== undefined ? { description: r.description } : {}),
-      ...(r.confidence !== undefined ? { confidence: r.confidence } : {}),
-      ...(r.source !== undefined ? { source: r.source } : {}),
-      ...(r.ai_job_id !== undefined ? { ai_job_id: r.ai_job_id } : {}),
-    };
+      ...(known as Record<string, unknown>),
+      tags,
+    } as unknown as RelationCreateInput;
     relations.push(item);
   }
 
