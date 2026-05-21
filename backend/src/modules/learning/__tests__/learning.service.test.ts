@@ -392,3 +392,97 @@ describe('LearningService.synonymCandidates', () => {
     expect(pairs).not.toContain('N2-N1');
   });
 });
+
+describe('learning path with operation flow relations (v2)', () => {
+  it('walks NEXT_STEP backwards from a target step', async () => {
+    const gid = 'g_op_1';
+    await prisma.graph.create({
+      data: { graph_id: gid, graph_name: 'op', graph_type: 'course' },
+    });
+    for (const id of ['s1', 's2', 's3', 's4']) {
+      await prisma.node.create({
+        data: {
+          node_id: id,
+          graph_id: gid,
+          node_type: 'operation_step',
+          name: id,
+          status: 'approved',
+          tags: { step_order: Number(id.slice(1)) },
+        },
+      });
+    }
+    for (const [s, t] of [['s1', 's2'], ['s2', 's3'], ['s3', 's4']]) {
+      await prisma.relation.create({
+        data: {
+          graph_id: gid,
+          source_id: s as string,
+          target_id: t as string,
+          relation_type: 'NEXT_STEP',
+          status: 'approved', // CTE 只走 approved
+        },
+      });
+    }
+    const r = await LearningService.learningPath('s4', { depth: 6 });
+    expect(r?.path.map((p) => p.node_id)).toEqual(['s1', 's2', 's3']);
+  });
+
+  it('walks HAS_STEP from operation_process to its first step', async () => {
+    const gid = 'g_op_2';
+    await prisma.graph.create({
+      data: { graph_id: gid, graph_name: 'op2', graph_type: 'course' },
+    });
+    await prisma.node.create({
+      data: { node_id: 'proc1', graph_id: gid, node_type: 'operation_process', name: 'p', status: 'approved' },
+    });
+    await prisma.node.create({
+      data: { node_id: 'st1', graph_id: gid, node_type: 'operation_step', name: 's1', status: 'approved', tags: { step_order: 1 } },
+    });
+    await prisma.relation.create({
+      data: { graph_id: gid, source_id: 'proc1', target_id: 'st1', relation_type: 'HAS_STEP', status: 'approved' },
+    });
+    const r = await LearningService.learningPath('st1', { depth: 6 });
+    expect(r?.path.map((p) => p.node_id)).toContain('proc1');
+  });
+
+  it('mixes PREREQUISITE_OF and NEXT_STEP', async () => {
+    const gid = 'g_mix';
+    await prisma.graph.create({
+      data: { graph_id: gid, graph_name: 'mix', graph_type: 'course' },
+    });
+    await prisma.node.createMany({
+      data: [
+        { node_id: 'kp1', graph_id: gid, node_type: 'knowledge_point', name: 'kp1', status: 'approved' },
+        { node_id: 'sm1', graph_id: gid, node_type: 'operation_step', name: 's1', status: 'approved' },
+        { node_id: 'sm2', graph_id: gid, node_type: 'operation_step', name: 's2', status: 'approved' },
+      ],
+    });
+    await prisma.relation.createMany({
+      data: [
+        { graph_id: gid, source_id: 'kp1', target_id: 'sm1', relation_type: 'PREREQUISITE_OF', status: 'approved' },
+        { graph_id: gid, source_id: 'sm1', target_id: 'sm2', relation_type: 'NEXT_STEP', status: 'approved' },
+      ],
+    });
+    const r = await LearningService.learningPath('sm2', { depth: 6 });
+    const ids = r?.path.map((p) => p.node_id) ?? [];
+    expect(ids).toEqual(['kp1', 'sm1']);
+  });
+
+  it('does not break the existing PREREQUISITE_OF-only chain', async () => {
+    const gid = 'g_legacy_v2';
+    await prisma.graph.create({
+      data: { graph_id: gid, graph_name: 'legacy', graph_type: 'course' },
+    });
+    await prisma.node.createMany({
+      data: [
+        { node_id: 'aa', graph_id: gid, node_type: 'knowledge_point', name: 'a', status: 'approved' },
+        { node_id: 'bb', graph_id: gid, node_type: 'knowledge_point', name: 'b', status: 'approved' },
+      ],
+    });
+    await prisma.relation.create({
+      data: { graph_id: gid, source_id: 'aa', target_id: 'bb', relation_type: 'PREREQUISITE_OF', status: 'approved' },
+    });
+    const r = await LearningService.learningPath('bb', { depth: 5 });
+    expect(r?.path[0]?.node_id).toBe('aa');
+    expect(r?.path[0]?.via).toBe('PREREQUISITE_OF');
+  });
+});

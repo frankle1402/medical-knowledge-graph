@@ -1,9 +1,28 @@
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 
 // ---------------------------------------------------------------------------
-// Task 1: Learning path (recursive CTE over 'PREREQUISITE_OF' relations)
+// Task 1: Learning path (recursive CTE over multiple relation types)
 // ---------------------------------------------------------------------------
+
+/**
+ * Relation types the learning-path walker follows backward from the target.
+ *
+ * - `PREREQUISITE_OF`  classic "A must be learned before B" prerequisite chain.
+ * - `HAS_STEP`         operation_process owns its operation_step children;
+ *                      walking back from a step reaches its parent process.
+ * - `NEXT_STEP`        adjacency between operation_steps; walking back assembles
+ *                      the ordered sequence that leads up to the target step.
+ *
+ * NOTE: `knowledgeGap` retains PREREQUISITE_OF-only by design — the "what's still
+ * blocking me" semantics for operation flows is not yet defined.
+ */
+const PATH_RELATION_TYPES = [
+  'PREREQUISITE_OF',
+  'HAS_STEP',
+  'NEXT_STEP',
+] as const;
 
 export const LearningPathQuery = z.object({
   depth: z.coerce.number().int().min(1).max(10).default(5),
@@ -23,14 +42,19 @@ export interface LearningPath {
 }
 
 /**
- * Walk backward from `node_id` along `relation_type='PREREQUISITE_OF'` edges.
+ * Walk backward from `node_id` along the relation types listed in
+ * `PATH_RELATION_TYPES` (PREREQUISITE_OF / HAS_STEP / NEXT_STEP).
  *
- * Edge semantics: `A --PREREQUISITE_OF--> B` means "A must be learned before B" (A is
- * a prerequisite of B). To produce a study order for B we walk from B
- * toward its sources (target_id = B → source_id = A), repeating up to
- * `q.depth` hops. Each hop reduces the `depth` field meaning "how far
- * from the target node the prereq sits". Output is sorted deepest-first
- * so callers can show foundational concepts at the top of a list.
+ * Edge semantics (all directed `source --type--> target`):
+ * - `A --PREREQUISITE_OF--> B`: A must be learned before B.
+ * - `P --HAS_STEP--> S`: operation_process P contains operation_step S.
+ * - `S1 --NEXT_STEP--> S2`: step S1 immediately precedes step S2 in a process.
+ *
+ * To produce a study order for a target node we walk against each edge
+ * (target_id → source_id), repeating up to `q.depth` hops. Each hop's
+ * `depth` field encodes "how far from the target the predecessor sits".
+ * Output is sorted deepest-first so callers can show foundational
+ * concepts / earliest steps at the top of a list.
  *
  * Implementation notes:
  * - `UNION` (not `UNION ALL`) on the CTE dedupes nodes encountered via
@@ -38,8 +62,8 @@ export interface LearningPath {
  * - We only follow edges with `status='approved'`; pending / rejected
  *   edges are noise from the AI ingestion pipeline.
  * - `DISTINCT ON (node_id) ... ORDER BY node_id, depth ASC` keeps the
- *   shallowest depth per node when one prereq is reachable via multiple
- *   chains.
+ *   shallowest depth per node when one predecessor is reachable via
+ *   multiple chains.
  */
 async function learningPath(
   node_id: string,
@@ -51,13 +75,17 @@ async function learningPath(
   });
   if (!target) return null;
 
+  const types = Prisma.sql`(${Prisma.join(
+    PATH_RELATION_TYPES.map((t) => Prisma.sql`${t}`),
+  )})`;
+
   const rows = await prisma.$queryRaw<Array<LearningPathStep>>`
     WITH RECURSIVE prereqs AS (
       SELECT n.node_id, n.name, 1 AS depth, r.relation_type AS via
       FROM relations r
       JOIN nodes n ON n.node_id = r.source_id
       WHERE r.target_id = ${node_id}
-        AND r.relation_type = 'PREREQUISITE_OF'
+        AND r.relation_type IN ${types}
         AND r.status = 'approved'
 
       UNION
@@ -66,7 +94,7 @@ async function learningPath(
       FROM prereqs p
       JOIN relations r ON r.target_id = p.node_id
       JOIN nodes n ON n.node_id = r.source_id
-      WHERE r.relation_type = 'PREREQUISITE_OF'
+      WHERE r.relation_type IN ${types}
         AND r.status = 'approved'
         AND p.depth < ${q.depth}::int
     )
