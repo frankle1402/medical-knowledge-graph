@@ -131,6 +131,35 @@ export const CaseNode = BaseNode.extend({
 });
 export type CaseNode = z.infer<typeof CaseNode>;
 
+export const OperationProcessNode = BaseNode.extend({
+  node_type: z.literal('operation_process'),
+});
+export type OperationProcessNode = z.infer<typeof OperationProcessNode>;
+
+export const RiskNode = BaseNode.extend({
+  node_type: z.literal('risk'),
+  severity: z.string().optional(),
+});
+export type RiskNode = z.infer<typeof RiskNode>;
+
+export const ErrorNode = BaseNode.extend({
+  node_type: z.literal('error'),
+});
+export type ErrorNode = z.infer<typeof ErrorNode>;
+
+export const MeasureNode = BaseNode.extend({
+  node_type: z.literal('measure'),
+  measure_type: z.enum(['handling', 'prevention', 'observation']).optional(),
+});
+export type MeasureNode = z.infer<typeof MeasureNode>;
+
+export const AssessmentItemNode = BaseNode.extend({
+  node_type: z.literal('assessment_item'),
+  score: z.number().optional(),
+  criteria: z.string().optional(),
+});
+export type AssessmentItemNode = z.infer<typeof AssessmentItemNode>;
+
 export const Node = z.discriminatedUnion('node_type', [
   TextbookNode,
   ChapterNode,
@@ -143,6 +172,11 @@ export const Node = z.discriminatedUnion('node_type', [
   TableNode,
   QuestionNode,
   CaseNode,
+  OperationProcessNode,
+  RiskNode,
+  ErrorNode,
+  MeasureNode,
+  AssessmentItemNode,
 ]);
 export type Node = z.infer<typeof Node>;
 
