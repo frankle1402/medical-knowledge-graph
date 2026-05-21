@@ -10,7 +10,7 @@ export default defineConfig({
     env: {
       STORAGE_BACKEND: process.env.STORAGE_BACKEND ?? 'pg',
     },
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'prisma/__tests__/**/*.test.ts'],
     setupFiles: ['./src/__tests__/setup.ts'],
     globalSetup: ['./src/__tests__/globalSetup.ts'],
     pool: 'forks',
