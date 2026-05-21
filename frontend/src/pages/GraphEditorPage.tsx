@@ -15,6 +15,7 @@ import { LearningPathPanel } from '../components/GraphEditor/LearningPathPanel';
 import { NodeForm } from '../components/GraphEditor/NodeForm';
 import { NodeSearchBox } from '../components/GraphEditor/NodeSearchBox';
 import { RelationForm } from '../components/GraphEditor/RelationForm';
+import type { RelationEditPatch } from '../components/GraphEditor/RelationForm';
 import { SynonymMergePanel } from '../components/GraphEditor/SynonymMergePanel';
 import { NodePanel } from '../components/NodePanel';
 import { ReviewPanel } from '../components/ReviewPanel';
@@ -49,6 +50,7 @@ export function GraphEditorPage() {
 
   const [createNodeOpen, setCreateNodeOpen] = useState(false);
   const [editNodeOpen, setEditNodeOpen] = useState(false);
+  const [editingRelationId, setEditingRelationId] = useState<string | null>(null);
   const [pendingConnection, setPendingConnection] = useState<{
     source: string;
     target: string;
@@ -119,6 +121,10 @@ export function GraphEditorPage() {
     () => relations.find((r) => r.relation_id === selectedRelationId) ?? null,
     [relations, selectedRelationId],
   );
+  const editingRelation = useMemo(
+    () => relations.find((r) => r.relation_id === editingRelationId) ?? null,
+    [relations, editingRelationId],
+  );
 
   const handleCanvasDoubleClick = () => setCreateNodeOpen(true);
   const handleSelectNode = (id: string | null) => selectNode(id);
@@ -171,6 +177,17 @@ export function GraphEditorPage() {
       removeRelation(selectedRelation.relation_id);
     } catch (err) {
       alert(err instanceof Error ? err.message : '删除失败');
+    }
+  };
+
+  const handleUpdateRelation = async (patch: RelationEditPatch) => {
+    if (!editingRelation?.relation_id) return;
+    try {
+      const updated = await relationsApi.update(editingRelation.relation_id, patch);
+      upsertRelation(updated);
+      setEditingRelationId(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '更新关系失败');
     }
   };
 
@@ -303,6 +320,7 @@ export function GraphEditorPage() {
           onPositionChange={(id, pos) => positionsRef.current.set(id, pos)}
           focusedNodeIds={focusedNodeIds}
           onExpandFocus={handleExpandFocus}
+          onEditRelation={setEditingRelationId}
         />
       </main>
 
@@ -392,6 +410,33 @@ export function GraphEditorPage() {
             targetName={nodes.find((n) => n.node_id === pendingConnection.target)?.name}
             onSubmit={handleCreateRelation}
             onCancel={() => setPendingConnection(null)}
+          />
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={!!editingRelation}
+        title="编辑关系"
+        onClose={() => setEditingRelationId(null)}
+        testId="edit-relation-modal"
+      >
+        {editingRelation ? (
+          <RelationForm
+            mode="edit"
+            sourceId={editingRelation.source_id}
+            targetId={editingRelation.target_id}
+            sourceName={nodes.find((n) => n.node_id === editingRelation.source_id)?.name}
+            targetName={nodes.find((n) => n.node_id === editingRelation.target_id)?.name}
+            initial={{
+              relation_type: editingRelation.relation_type,
+              ...(editingRelation.description ? { description: editingRelation.description } : {}),
+              ...(editingRelation.confidence !== undefined
+                ? { confidence: editingRelation.confidence }
+                : {}),
+              status: editingRelation.status,
+            }}
+            onSubmit={handleUpdateRelation}
+            onCancel={() => setEditingRelationId(null)}
           />
         ) : null}
       </Modal>

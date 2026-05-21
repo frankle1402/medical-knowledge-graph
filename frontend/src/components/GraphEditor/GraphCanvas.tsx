@@ -38,6 +38,8 @@ export interface CanvasProps {
   /** Called when user double-clicks a dimmed (non-focused) node — parent should
    *  add it to the focus set to grow the visible subgraph. */
   onExpandFocus?: (nodeId: string) => void;
+  /** Called when user double-clicks an edge — parent opens the edit dialog. */
+  onEditRelation?: (relationId: string) => void;
 }
 
 interface EdgeHandlesInstance {
@@ -60,6 +62,7 @@ export function GraphCanvas(props: CanvasProps) {
     onPositionChange,
     focusedNodeIds,
     onExpandFocus,
+    onEditRelation,
   } = props;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -77,6 +80,7 @@ export function GraphCanvas(props: CanvasProps) {
     onCanvasDoubleClick,
     onPositionChange,
     onExpandFocus,
+    onEditRelation,
   });
   callbackRefs.current = {
     onSelectNode,
@@ -86,6 +90,7 @@ export function GraphCanvas(props: CanvasProps) {
     onCanvasDoubleClick,
     onPositionChange,
     onExpandFocus,
+    onEditRelation,
   };
 
   // Latest focused-set ref so dblclick handler can read it without re-binding.
@@ -344,6 +349,7 @@ export function GraphCanvas(props: CanvasProps) {
 
     // ---- Double-click:
     //   - on empty pane → create node
+    //   - on an edge → open relation edit dialog
     //   - on a node while focus mode is active and that node is outside the
     //     focus set → expand focus to include it (Neo4j-style growing)
     cy.on('dblclick', (evt: EventObject) => {
@@ -353,6 +359,10 @@ export function GraphCanvas(props: CanvasProps) {
         return;
       }
       const target = evt.target as cytoscape.Singular;
+      if (target.isEdge && target.isEdge()) {
+        callbackRefs.current.onEditRelation?.(target.id());
+        return;
+      }
       if (target.isNode && target.isNode()) {
         const focused = focusedRef.current;
         if (focused && focused.size > 0 && !focused.has(target.id())) {

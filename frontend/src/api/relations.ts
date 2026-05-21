@@ -1,4 +1,4 @@
-import type { Relation, RelationCreateInput, NodeStatus } from '@mkg/shared';
+import type { Relation, RelationCreateInput, RelationType, NodeStatus } from '@mkg/shared';
 import { apiClient } from '../lib/api';
 
 export const relationsApi = {
@@ -8,7 +8,12 @@ export const relationsApi = {
     apiClient.post<Relation>(`/api/graphs/${encodeURIComponent(graphId)}/relations`, input),
   update: (
     relationId: string,
-    input: { description?: string; confidence?: number; status?: NodeStatus },
+    input: {
+      relation_type?: RelationType;
+      description?: string;
+      confidence?: number;
+      status?: NodeStatus;
+    },
   ) => apiClient.put<Relation>(`/api/relations/${encodeURIComponent(relationId)}`, input),
   remove: (relationId: string) =>
     apiClient.delete<{ ok: boolean }>(`/api/relations/${encodeURIComponent(relationId)}`),
