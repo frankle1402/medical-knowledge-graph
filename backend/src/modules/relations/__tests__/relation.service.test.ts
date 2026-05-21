@@ -98,6 +98,49 @@ describe('RelationService', () => {
     expect(updated?.confidence).toBe(0.42);
   });
 
+  it('update mutates relation_type', async () => {
+    const r = await RelationService.create(graphId, {
+      source_id: aId,
+      target_id: bId,
+      relation_type: 'RELATED_TO',
+    });
+    const updated = await RelationService.update(r.relation_id, {
+      relation_type: 'PREREQUISITE_OF',
+    });
+    expect(updated?.relation_type).toBe('PREREQUISITE_OF');
+  });
+
+  it('update rejects relation_type BELONGS_TO_GRAPH', async () => {
+    const r = await RelationService.create(graphId, {
+      source_id: aId,
+      target_id: bId,
+      relation_type: 'RELATED_TO',
+    });
+    await expect(
+      RelationService.update(r.relation_id, {
+        relation_type: 'BELONGS_TO_GRAPH' as any,
+      }),
+    ).rejects.toThrow(/BELONGS_TO_GRAPH/);
+  });
+
+  it('update accepts status + confidence + relation_type together', async () => {
+    const r = await RelationService.create(graphId, {
+      source_id: aId,
+      target_id: bId,
+      relation_type: 'RELATED_TO',
+    });
+    const updated = await RelationService.update(r.relation_id, {
+      relation_type: 'EASILY_CONFUSED_WITH',
+      confidence: 0.7,
+      status: 'approved',
+      description: 'reviewed',
+    });
+    expect(updated?.relation_type).toBe('EASILY_CONFUSED_WITH');
+    expect(updated?.confidence).toBe(0.7);
+    expect(updated?.status).toBe('approved');
+    expect(updated?.description).toBe('reviewed');
+  });
+
   it('update returns null for missing relation', async () => {
     const updated = await RelationService.update('999999999', {
       description: 'ghost',

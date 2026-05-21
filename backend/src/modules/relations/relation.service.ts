@@ -21,6 +21,7 @@ import { getStorageBackend } from '../../lib/storage-backend.js';
 
 export const RelationUpdateInput = z
   .object({
+    relation_type: RelationType.optional(),
     description: z.string().optional(),
     confidence: z.number().min(0).max(1).optional(),
     status: NodeStatus.optional(),
@@ -137,6 +138,12 @@ const RelationServiceCrudNeo4j = {
   ): Promise<RelationRecord | null> {
     if (!/^\d+$/.test(relation_id)) {
       throw Object.assign(new Error('invalid relation_id'), { statusCode: 400 });
+    }
+    if (patch.relation_type) {
+      throw Object.assign(
+        new Error('relation_type changes are not supported on the Neo4j backend'),
+        { statusCode: 400 },
+      );
     }
     const cleaned = compact(patch as Record<string, unknown>);
     if (Object.keys(cleaned).length === 0) {
@@ -409,6 +416,11 @@ const RelationServicePg = {
   ): Promise<RelationRecord | null> {
     if (!/^\d+$/.test(relation_id)) {
       throw Object.assign(new Error('invalid relation_id'), { statusCode: 400 });
+    }
+    if (patch.relation_type === 'BELONGS_TO_GRAPH') {
+      throw Object.assign(new Error('BELONGS_TO_GRAPH is reserved'), {
+        statusCode: 400,
+      });
     }
     const id = BigInt(relation_id);
     const cleaned: Record<string, unknown> = {};
