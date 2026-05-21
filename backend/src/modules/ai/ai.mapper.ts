@@ -5,8 +5,14 @@
  * objects can reference them via source_id/target_id. We preserve these IDs
  * through the create-batch call so the relation pass can resolve cross-refs.
  *
- * Our shared `NodeCreateInput` is `passthrough()`, so any extra fields the LLM
- * emitted on a typed node (e.g. knowledge_type, page_no, aliases) are kept.
+ * v2 (medical KG): the `nodes` table has a fixed column whitelist (see
+ * `NODE_COLUMNS` in `node.service.ts`). Any extra LLM fields the schema
+ * does NOT own — e.g. `step_order`, `phase`, `aliases`, `standard_term`,
+ * `evidence`, `key_action` — would otherwise be silently dropped at the
+ * Postgres boundary. We collapse all such extras into the `tags` JSON column
+ * so the v2 prompts can emit rich metadata without a schema migration per
+ * field. Legacy array-shaped tags are preserved under `tags._legacy` so the
+ * existing fixtures keep working until Slice C normalizes them.
  */
 
 import type {
@@ -31,6 +37,23 @@ export interface MapOptions {
   dropDanglingRelations?: boolean;
 }
 
+// Must stay aligned with `NODE_COLUMNS` in
+// backend/src/modules/nodes/node.service.ts. Anything not in this set is
+// folded into `tags` rather than spread to the top level — otherwise
+// `pickNodeColumns` would silently drop it.
+const NODE_DB_COLUMNS = new Set([
+  'node_id',
+  'node_type',
+  'name',
+  'description',
+  'knowledge_type',
+  'status',
+  'source',
+  'confidence',
+  'tags',
+  'ai_job_id',
+]);
+
 /**
  * Convert a parsed AIGenerateOutput into bulk-create inputs.
  *
@@ -51,29 +74,30 @@ export function mapLLMOutput(
 
   const knownNodeIds = new Set<string>();
   const nodes: NodeCreateInput[] = parsed.nodes.map((n) => {
-    knownNodeIds.add(n.node_id);
-    // The shared Node union has many type-specific fields; we forward the full
-    // object to bulkCreate (NodeCreateInput is passthrough), preserving e.g.
-    // KnowledgePointNode.knowledge_type or TermNode.aliases.
-    const { node_id, node_type, name, description, tags, confidence, source, ai_job_id, status, ...rest } = n;
-    const out: NodeCreateInput = {
-      node_type,
-      name,
-      ...(description !== undefined ? { description } : {}),
-      ...(tags !== undefined ? { tags } : {}),
-      ...(confidence !== undefined ? { confidence } : {}),
-      ...(source !== undefined ? { source } : {}),
-      ...(ai_job_id !== undefined ? { ai_job_id } : {}),
-      // Preserve the LLM-supplied node_id and any type-specific extras via
-      // passthrough. We attach via spread so TS sees them as `unknown`-ish but
-      // the runtime schema accepts them.
-      ...(rest as Record<string, unknown>),
-    };
-    // Tack node_id on as a passthrough field. Tests rely on this.
-    (out as Record<string, unknown>).node_id = node_id;
-    if (status !== undefined) {
-      (out as Record<string, unknown>).status = status;
+    const known: Record<string, unknown> = {};
+    const extras: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(n)) {
+      if (v === undefined) continue;
+      if (k === 'tags') continue; // handled separately below
+      if (NODE_DB_COLUMNS.has(k)) known[k] = v;
+      else extras[k] = v;
     }
+    knownNodeIds.add(n.node_id as string);
+
+    // Merge LLM-supplied tags with the extras bucket. Array-shaped tags are
+    // preserved as `_legacy` so callers that still emit string[] do not lose
+    // data while the v2 schema rolls out.
+    const baseTags =
+      Array.isArray(n.tags)
+        ? { _legacy: n.tags as unknown[] }
+        : n.tags && typeof n.tags === 'object'
+          ? (n.tags as Record<string, unknown>)
+          : {};
+
+    const out = {
+      ...known,
+      tags: { ...baseTags, ...extras },
+    } as unknown as NodeCreateInput;
     return out;
   });
 

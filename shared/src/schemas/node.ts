@@ -10,6 +10,19 @@ import {
 } from '../enums';
 
 /**
+ * `tags` 字段在 v2 之前是 `string[]`，v2 起改为 JSON 对象，承载 LLM 输出的扩展字段
+ * （step_order / phase / aliases / standard_term / evidence ...）。
+ * 为保留旧测试 fixture（`tags: []` / `tags: ['x']`），这里用 union 接两种形态——
+ * 落库前 `node.service.ts` 会把数组态包成 `{ _legacy: [...] }` 或视为空对象。
+ */
+const TagsValue = z
+  .union([
+    z.array(z.string()),
+    z.record(z.string(), z.unknown()),
+  ])
+  .default({});
+
+/**
  * 节点公共字段。所有具体类型 extend 此 schema。
  * `ai_job_id` 由 Agent-C/Agent-B 协议要求，AI 生成时携带，便于按 job 批量审核 / 撤销。
  */
@@ -21,7 +34,7 @@ export const BaseNode = z.object({
   confidence: z.number().min(0).max(1).default(1),
   source: NodeSource.default('manual'),
   description: z.string().optional(),
-  tags: z.array(z.string()).default([]),
+  tags: TagsValue,
   ai_job_id: z.string().uuid().optional(),
   created_at: z.string().datetime().optional(),
   updated_at: z.string().datetime().optional(),
@@ -143,7 +156,7 @@ export const NodeCreateInput = z
     node_type: NodeType,
     name: z.string().min(1),
     description: z.string().optional(),
-    tags: z.array(z.string()).optional(),
+    tags: TagsValue.optional(),
     confidence: z.number().min(0).max(1).optional(),
     source: NodeSource.optional(),
     ai_job_id: z.string().uuid().optional(),
@@ -158,7 +171,7 @@ export const NodeUpdateInput = z
   .object({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
-    tags: z.array(z.string()).optional(),
+    tags: TagsValue.optional(),
     status: NodeStatus.optional(),
     confidence: z.number().min(0).max(1).optional(),
   })

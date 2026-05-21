@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GraphService } from '../../graphs/graph.service';
 import { NodeService, setNodeUpsertedHook } from '../node.service';
+import { prisma } from '../../../lib/prisma';
 
 /**
  * Each test starts with a fresh graph because the global `setup.ts`
@@ -307,5 +308,47 @@ describe('NodeService', () => {
     // Sanity: every produced row carries the unique node_id we forced.
     const ids = new Set(created.map((n) => n.node_id as string));
     expect(ids.size).toBe(N);
+  });
+});
+
+describe('NodeService.createBatch passes through unknown fields into tags', () => {
+  it('persists step_order / phase / aliases / standard_term into tags', async () => {
+    const gid = 'g_v2_pass';
+    await prisma.graph.create({
+      data: { graph_id: gid, graph_name: 'v2', graph_type: 'course' },
+    });
+
+    await NodeService.createBatch(gid, [
+      {
+        node_id: 'op_step_1',
+        node_type: 'operation_step',
+        name: '皮肤消毒',
+        // 以下扩展字段都应该被吸收进 tags
+        step_order: 1,
+        phase: '消毒',
+        key_action: '使用 75% 酒精环形消毒',
+        observation_points: ['消毒范围 ≥5cm'],
+        common_errors: ['消毒范围过小'],
+        evidence: { page_no: 128, source_quote: '皮肤消毒应使用...' },
+      },
+      {
+        node_id: 'term_extravasation',
+        node_type: 'term',
+        name: '输液外渗',
+        standard_term: '输液外渗',
+        aliases: ['针眼鼓包', '局部肿胀', '液体渗出'],
+        term_category: '护理操作异常',
+      },
+    ]);
+
+    const step = await prisma.node.findUnique({ where: { node_id: 'op_step_1' } });
+    expect((step?.tags as any).step_order).toBe(1);
+    expect((step?.tags as any).phase).toBe('消毒');
+    expect((step?.tags as any).key_action).toContain('酒精');
+    expect((step?.tags as any).evidence.page_no).toBe(128);
+
+    const term = await prisma.node.findUnique({ where: { node_id: 'term_extravasation' } });
+    expect((term?.tags as any).standard_term).toBe('输液外渗');
+    expect((term?.tags as any).aliases).toContain('针眼鼓包');
   });
 });

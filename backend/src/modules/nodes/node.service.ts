@@ -135,7 +135,9 @@ const NodeServiceCrudNeo4j = {
       node_id,
       status: input.status ?? 'candidate',
       source: input.source ?? 'manual',
-      tags: Array.isArray(input.tags) ? input.tags : [],
+      tags: (input.tags && typeof input.tags === 'object')
+        ? (input.tags as Record<string, unknown> | unknown[])
+        : {},
       created_at: now,
     });
 
@@ -383,11 +385,11 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 /**
- * Columns that the `nodes` table actually owns. AI input may contain extra
- * keys (difficulty, importance, standard_term, …) that Neo4j stored as
- * loose properties; Postgres has a fixed schema, so non-column inputs are
- * silently dropped at the DB boundary. Adding new columns is a Prisma
- * schema migration, not a service change.
+ * Columns that the `nodes` table actually owns. Anything else AI / API input
+ * carries (step_order, phase, aliases, evidence, key_action, ...) is folded
+ * into the `tags` JSON column by `pickNodeColumns` so v2 prompts can ride
+ * with rich metadata without a schema migration per field. Adding new top-
+ * level columns is a Prisma schema migration, not a service change.
  */
 const NODE_COLUMNS = new Set([
   'node_id',
@@ -403,13 +405,33 @@ const NODE_COLUMNS = new Set([
   'ai_job_id',
 ]);
 
+/**
+ * Project the input object onto the table's column whitelist, while folding
+ * non-column keys into `tags` so they are preserved as JSON instead of being
+ * silently dropped at the Postgres boundary. Legacy `tags: string[]` shapes
+ * are preserved under `_legacy` (the upstream `mapLLMOutput` does the same).
+ *
+ * `tags` is always emitted as an object — never undefined — so callers can
+ * assign it to a `Prisma.InputJsonValue` field without further clamping.
+ */
 function pickNodeColumns(
   input: Record<string, unknown>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  const extras: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(input)) {
-    if (NODE_COLUMNS.has(k) && v !== undefined) out[k] = v;
+    if (v === undefined) continue;
+    if (k === 'tags') continue; // handled after the loop
+    if (NODE_COLUMNS.has(k)) out[k] = v;
+    else extras[k] = v;
   }
+  const baseTags =
+    Array.isArray(input.tags)
+      ? { _legacy: input.tags as unknown[] }
+      : input.tags && typeof input.tags === 'object'
+        ? (input.tags as Record<string, unknown>)
+        : {};
+  out.tags = { ...baseTags, ...extras };
   return out;
 }
 
@@ -453,7 +475,6 @@ const NodeServicePg = {
       graph_id,
       status: (input.status as string | undefined) ?? 'candidate',
       source: (input.source as string | undefined) ?? 'manual',
-      tags: Array.isArray(input.tags) ? (input.tags as unknown[]) : [],
     } as unknown as Prisma.NodeUncheckedCreateInput;
 
     const created = await prisma.node.create({ data });
@@ -564,7 +585,6 @@ const NodeServicePg = {
         ai_job_id:
           (opts.ai_job_id as string | undefined) ??
           (n.ai_job_id as string | undefined),
-        tags: Array.isArray(n.tags) ? (n.tags as unknown[]) : [],
       } as unknown as Prisma.NodeUncheckedCreateInput & Record<string, unknown>;
     });
 

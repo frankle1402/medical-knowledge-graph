@@ -89,7 +89,7 @@ describe('parseLLMOutput', () => {
 });
 
 describe('mapLLMOutput', () => {
-  it('maps nodes preserving LLM-assigned node_id and type-specific fields', () => {
+  it('maps nodes preserving LLM-assigned node_id and folds type-specific fields into tags', () => {
     const parsed = parseLLMOutput(sampleOutput);
     const mapped = mapLLMOutput(parsed);
 
@@ -98,11 +98,16 @@ describe('mapLLMOutput', () => {
     expect(kp1.node_id).toBe('KP_001');
     expect(kp1.node_type).toBe('knowledge_point');
     expect(kp1.name).toBe('静脉输液概念');
+    // knowledge_type is a real DB column, so it stays at the top level.
     expect(kp1.knowledge_type).toBe('概念类');
 
+    // Term-specific fields (`standard_term`, `aliases`) are NOT columns on
+    // the `nodes` table; v2 routes them into `tags` instead of dropping
+    // them at the Postgres boundary.
     const tm1 = mapped.nodes[2] as Record<string, unknown>;
-    expect(tm1.standard_term).toBe('静脉输液');
-    expect(tm1.aliases).toEqual(['IV', 'intravenous infusion']);
+    const tags = tm1.tags as Record<string, unknown>;
+    expect(tags.standard_term).toBe('静脉输液');
+    expect(tags.aliases).toEqual(['IV', 'intravenous infusion']);
   });
 
   it('keeps relations whose endpoints exist', () => {
