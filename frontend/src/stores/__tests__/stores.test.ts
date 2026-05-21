@@ -11,7 +11,7 @@ const baseNode: KGNode = {
   confidence: 1,
   source: 'manual',
   knowledge_type: '概念类',
-  tags: [],
+  tags: {},
 } as unknown as KGNode;
 
 const otherNode: KGNode = { ...baseNode, node_id: 'KP_B', name: 'B' } as unknown as KGNode;

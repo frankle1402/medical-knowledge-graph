@@ -12,7 +12,7 @@ const node: KGNode = {
   confidence: 0.9,
   source: 'manual',
   knowledge_type: '概念类',
-  tags: ['cardio', 'vital'],
+  tags: { _legacy: ['cardio', 'vital'] },
   description: '心脏每分钟搏动次数。',
 } as unknown as KGNode;
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NodeType, KnowledgeType } from '@mkg/shared';
 import type { Node as KGNode, NodeCreateInput, NodeUpdateInput } from '@mkg/shared';
 import { NODE_TYPE_LABELS } from './nodeColors';
+import { asTagsObject } from './tags';
 import { Button } from '../ui';
 
 export type NodeFormMode = 'create' | 'edit';
@@ -34,7 +35,14 @@ export function NodeForm({ mode, initial, onSubmit, onCancel }: NodeFormProps) {
     (initial as { knowledge_type?: string } | undefined)?.knowledge_type ??
       KnowledgeType.options[0],
   );
-  const [tags, setTags] = useState((initial?.tags ?? []).join(', '));
+  // Initial tag chips come from the legacy `_legacy` subkey of the v2 tags object.
+  // Other v2-only keys (step_order, phase, aliases, ...) are read-only and not
+  // edited via this form — they pass through untouched on submit.
+  const initialTagsObj = asTagsObject(initial?.tags);
+  const initialChips = Array.isArray(initialTagsObj._legacy)
+    ? (initialTagsObj._legacy as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  const [tags, setTags] = useState(initialChips.join(', '));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -50,15 +58,22 @@ export function NodeForm({ mode, initial, onSubmit, onCancel }: NodeFormProps) {
     }
     setSubmitting(true);
     try {
+      const chips = tags
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      // Preserve any v2-only tag keys (step_order, phase, aliases, ...) coming
+      // from `initial`; only the `_legacy` subkey is editable through this form.
+      const submittedTags: Record<string, unknown> = {
+        ...asTagsObject(initial?.tags),
+        _legacy: chips,
+      };
       if (mode === 'create') {
         const payload: NodeCreateInput = {
           node_type: nodeType,
           name: name.trim(),
           description: description.trim() || undefined,
-          tags: tags
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
+          tags: submittedTags,
           source: 'manual',
         };
         if (nodeType === 'knowledge_point') {
@@ -69,10 +84,7 @@ export function NodeForm({ mode, initial, onSubmit, onCancel }: NodeFormProps) {
         const payload: NodeUpdateInput = {
           name: name.trim(),
           description: description.trim() || undefined,
-          tags: tags
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
+          tags: submittedTags,
         };
         await onSubmit(payload, mode);
       }

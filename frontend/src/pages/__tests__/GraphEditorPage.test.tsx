@@ -34,7 +34,7 @@ const sampleGraph = {
       confidence: 1,
       source: 'manual',
       knowledge_type: '概念类',
-      tags: [],
+      tags: {},
     },
   ],
   relations: [],

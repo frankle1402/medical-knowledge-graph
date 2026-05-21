@@ -25,7 +25,7 @@ const candidateNode: KGNode = {
   status: 'candidate',
   confidence: 0.82,
   source: 'ai',
-  tags: [],
+  tags: {},
   knowledge_type: 'concept',
   ai_job_id: JOB_ID,
   description: '动脉血压持续升高的临床综合征。',

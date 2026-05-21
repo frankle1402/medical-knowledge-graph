@@ -10,6 +10,7 @@ import edgehandles from 'cytoscape-edgehandles';
 import coseBilkent from 'cytoscape-cose-bilkent';
 import type { Node as KGNode, Relation } from '@mkg/shared';
 import { NODE_COLORS, NODE_TYPE_LABELS, RELATION_TYPE_LABELS } from './nodeColors';
+import { buildEdgeStylesheet } from './edgeStyles';
 
 if (!(cytoscape as unknown as { _mkgRegistered?: boolean })._mkgRegistered) {
   cytoscape.use(coseBilkent);
@@ -123,8 +124,9 @@ export function GraphCanvas(props: CanvasProps) {
           id: r.relation_id,
           source: r.source_id,
           target: r.target_id,
-          label: RELATION_TYPE_LABELS[r.relation_type],
+          label: RELATION_TYPE_LABELS[r.relation_type] ?? r.relation_type,
           status: r.status,
+          relation_type: r.relation_type,
         },
       });
     }
@@ -270,6 +272,11 @@ export function GraphCanvas(props: CanvasProps) {
           selector: '.focused',
           style: { opacity: 1 },
         },
+        // Per-relation-type styles must come last so they override the default
+        // `selector: 'edge'` line-color/width when the relation_type matches.
+        // `edge[status = "candidate"]` and `edge:selected` still apply on top
+        // because cytoscape composites styles per-element.
+        ...buildEdgeStylesheet(),
       ],
       layout: { name: 'preset' },
     });

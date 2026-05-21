@@ -36,7 +36,7 @@ describe('NodeForm', () => {
           node_id: 'KP_1',
           node_type: 'knowledge_point',
           name: '原',
-          tags: ['a', 'b'],
+          tags: { _legacy: ['a', 'b'] },
         }}
         onSubmit={onSubmit}
         onCancel={() => {}}
@@ -49,7 +49,7 @@ describe('NodeForm', () => {
     expect(onSubmit).toHaveBeenCalled();
     const [payload, mode] = onSubmit.mock.calls[0]!;
     expect(mode).toBe('edit');
-    expect(payload).toMatchObject({ name: '改名', tags: ['a', 'b'] });
+    expect(payload).toMatchObject({ name: '改名', tags: { _legacy: ['a', 'b'] } });
     expect((payload as { node_type?: string }).node_type).toBeUndefined();
   });
 });
