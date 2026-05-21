@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { GraphService } from '../../graphs/graph.service';
 import { NodeService } from '../../nodes/node.service';
 import { RelationService } from '../relation.service';
+import { prisma } from '../../../lib/prisma';
 
 describe('RelationService', () => {
   let graphId: string;
@@ -215,5 +216,76 @@ describe('RelationService', () => {
     );
     const deleted = await RelationService.bulkDeleteByJob(graphId, 'rj3');
     expect(deleted).toBe(1);
+  });
+
+  it('persists tags object on create + read', async () => {
+    const r = await RelationService.create(graphId, {
+      source_id: aId,
+      target_id: bId,
+      relation_type: 'PREREQUISITE_OF',
+      tags: {
+        reason: '前置概念',
+        evidence_quote: '需先掌握 A 才能学习 B',
+      },
+    });
+    expect((r.tags as Record<string, unknown>).reason).toBe('前置概念');
+
+    const fresh = await prisma.relation.findUnique({
+      where: { relation_id: BigInt(r.relation_id) },
+    });
+    expect((fresh?.tags as Record<string, unknown>).reason).toBe('前置概念');
+    expect((fresh?.tags as Record<string, unknown>).evidence_quote).toBe(
+      '需先掌握 A 才能学习 B',
+    );
+
+    // listByGraph should also surface the tags
+    const list = await RelationService.listByGraph(graphId);
+    const found = list.find((x) => x.relation_id === r.relation_id);
+    expect((found?.tags as Record<string, unknown>).reason).toBe('前置概念');
+  });
+
+  it('defaults tags to {} when not provided on create', async () => {
+    const r = await RelationService.create(graphId, {
+      source_id: aId,
+      target_id: bId,
+      relation_type: 'RELATED_TO',
+    });
+    expect(r.tags).toEqual({});
+  });
+
+  it('update accepts tags patch and persists merged JSON', async () => {
+    const r = await RelationService.create(graphId, {
+      source_id: aId,
+      target_id: bId,
+      relation_type: 'RELATED_TO',
+      tags: { reason: 'initial' },
+    });
+    const updated = await RelationService.update(r.relation_id, {
+      tags: { reason: 'revised', direction_explanation: 'A 引出 B' },
+    });
+    expect((updated?.tags as Record<string, unknown>).reason).toBe('revised');
+    expect((updated?.tags as Record<string, unknown>).direction_explanation).toBe(
+      'A 引出 B',
+    );
+  });
+
+  it('createBatch persists tags per relation', async () => {
+    const written = await RelationService.createBatch(
+      graphId,
+      [
+        {
+          source_id: aId,
+          target_id: bId,
+          relation_type: 'PREREQUISITE_OF',
+          // batch input is loosely typed in the service; cast keeps the test honest
+          tags: { reason: '前置' },
+        } as never,
+      ],
+      { ai_job_id: 'rj-tags', status: 'candidate' },
+    );
+    expect(written).toBe(1);
+    const list = await RelationService.listByGraph(graphId);
+    const found = list.find((x) => x.relation_type === 'PREREQUISITE_OF');
+    expect((found?.tags as Record<string, unknown>).reason).toBe('前置');
   });
 });

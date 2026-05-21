@@ -25,6 +25,7 @@ export const RelationUpdateInput = z
     description: z.string().optional(),
     confidence: z.number().min(0).max(1).optional(),
     status: NodeStatus.optional(),
+    tags: z.record(z.unknown()).optional(),
   })
   .strict();
 export type RelationUpdateInput = z.infer<typeof RelationUpdateInput>;
@@ -314,6 +315,7 @@ function toRelationRecord(r: {
   status: string;
   confidence: number;
   description: string | null;
+  tags: Prisma.JsonValue;
   ai_job_id: string | null;
   created_at: Date;
   updated_at: Date;
@@ -330,6 +332,8 @@ function toRelationRecord(r: {
   };
   if (r.description !== null) out.description = r.description;
   if (r.ai_job_id !== null) out.ai_job_id = r.ai_job_id;
+  // Always emit tags (default '{}' in DB) so callers/UI can rely on the field.
+  out.tags = (r.tags ?? {}) as Record<string, unknown>;
   return out;
 }
 
@@ -397,6 +401,7 @@ const RelationServicePg = {
         confidence: input.confidence ?? 1,
         status: input.status ?? 'approved',
         ai_job_id: input.ai_job_id ?? null,
+        tags: (input.tags ?? {}) as Prisma.InputJsonValue,
       },
     });
     return toRelationRecord(created);
@@ -501,12 +506,14 @@ const RelationServicePg = {
           confidence: r.confidence ?? 1,
           status: opts.status ?? r.status ?? 'candidate',
           ai_job_id: opts.ai_job_id ?? r.ai_job_id ?? null,
+          tags: ((r as { tags?: unknown }).tags ?? {}) as Prisma.InputJsonValue,
         },
         update: {
           description: r.description ?? null,
           confidence: r.confidence ?? 1,
           status: opts.status ?? r.status ?? 'candidate',
           ai_job_id: opts.ai_job_id ?? r.ai_job_id ?? null,
+          tags: ((r as { tags?: unknown }).tags ?? {}) as Prisma.InputJsonValue,
         },
       }),
     );
