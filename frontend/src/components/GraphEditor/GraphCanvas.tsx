@@ -17,6 +17,10 @@ if (!(cytoscape as unknown as { _mkgRegistered?: boolean })._mkgRegistered) {
   (cytoscape as unknown as { _mkgRegistered: boolean })._mkgRegistered = true;
 }
 
+// Step factor for the toolbar +/− zoom buttons. Module-scope so it stays
+// stable across re-renders and is testable as a black-box constant.
+const ZOOM_STEP = 1.2;
+
 export interface CanvasProps {
   nodes: KGNode[];
   relations: Relation[];
@@ -485,6 +489,15 @@ export function GraphCanvas(props: CanvasProps) {
     cyRef.current?.fit(undefined, 30);
   };
 
+  const zoomBy = (factor: number) => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const container = cy.container();
+    const w = container?.clientWidth ?? 0;
+    const h = container?.clientHeight ?? 0;
+    cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: w / 2, y: h / 2 } });
+  };
+
   return (
     <div
       data-testid="graph-canvas"
@@ -494,11 +507,17 @@ export function GraphCanvas(props: CanvasProps) {
     >
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
       <div style={floatingControlsStyle}>
-        <button type="button" onClick={runLayout} style={ctrlBtnStyle} title="重新布局">
+        <button type="button" onClick={runLayout} style={ctrlBtnStyle} title="重新布局" data-testid="canvas-auto-layout">
           自动布局
         </button>
-        <button type="button" onClick={fitView} style={ctrlBtnStyle} title="适应视图">
+        <button type="button" onClick={fitView} style={ctrlBtnStyle} title="适应视图" data-testid="canvas-fit-view">
           适应视图
+        </button>
+        <button type="button" onClick={() => zoomBy(ZOOM_STEP)} style={ctrlBtnGlyphStyle} title="放大" data-testid="canvas-zoom-in" aria-label="放大">
+          +
+        </button>
+        <button type="button" onClick={() => zoomBy(1 / ZOOM_STEP)} style={ctrlBtnGlyphStyle} title="缩小" data-testid="canvas-zoom-out" aria-label="缩小">
+          −
         </button>
       </div>
       {/* Hidden DOM mirror so e2e / unit tests can assert visibility by node label.
@@ -543,6 +562,14 @@ const ctrlBtnStyle: React.CSSProperties = {
   borderRadius: 6,
   cursor: 'pointer',
   boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+};
+
+const ctrlBtnGlyphStyle: React.CSSProperties = {
+  ...ctrlBtnStyle,
+  padding: '6px 10px',
+  fontSize: 14,
+  fontWeight: 600,
+  minWidth: 30,
 };
 
 const hiddenListStyle: React.CSSProperties = {
