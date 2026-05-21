@@ -9,6 +9,10 @@ interface LearningPathPanelProps {
   onClose: () => void;
   /** Reuse the existing focus-mode handler (handleEnterFocus). */
   onJumpToNode: (nodeId: string) => void;
+  /** Fired once after `learningPath` resolves successfully. The argument is
+   *  `[target.node_id, ...path[].node_id]` in render order so the parent can
+   *  pass it directly to a focus-mode setter. Not called on 404 / errors. */
+  onPathLoaded?: (nodeIds: string[]) => void;
 }
 
 type Phase = 'loading' | 'ready' | 'not_found' | 'pg_required' | 'error';
@@ -21,7 +25,12 @@ type Phase = 'loading' | 'ready' | 'not_found' | 'pg_required' | 'error';
  * order so foundational concepts sit at the top and the target sits at the
  * bottom — closer to a study plan reading order.
  */
-export function LearningPathPanel({ nodeId, onClose, onJumpToNode }: LearningPathPanelProps) {
+export function LearningPathPanel({
+  nodeId,
+  onClose,
+  onJumpToNode,
+  onPathLoaded,
+}: LearningPathPanelProps) {
   const [phase, setPhase] = useState<Phase>('loading');
   const [data, setData] = useState<LearningPathResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -43,6 +52,7 @@ export function LearningPathPanel({ nodeId, onClose, onJumpToNode }: LearningPat
         if (cancelled) return;
         setData(res);
         setPhase('ready');
+        onPathLoaded?.([res.target.node_id, ...res.path.map((s) => s.node_id)]);
       })
       .catch((err: unknown) => {
         if (cancelled) return;

@@ -126,4 +126,55 @@ describe('LearningPathPanel', () => {
     expect(spy.mock.calls[0]?.[0]).toBe('A');
     expect(spy.mock.calls[1]?.[0]).toBe('B');
   });
+
+  it('calls onPathLoaded with [target, ...path] node ids once data resolves', async () => {
+    vi.spyOn(learningApi, 'learningPath').mockResolvedValue(samplePath);
+    const onPathLoaded = vi.fn();
+    render(
+      <LearningPathPanel
+        nodeId="KP_target"
+        onClose={() => {}}
+        onJumpToNode={() => {}}
+        onPathLoaded={onPathLoaded}
+      />,
+    );
+    await screen.findByTestId('learning-path-list');
+    expect(onPathLoaded).toHaveBeenCalledTimes(1);
+    expect(onPathLoaded).toHaveBeenCalledWith(['KP_target', 'KP_a', 'KP_b', 'KP_c']);
+  });
+
+  it('does not call onPathLoaded on 404', async () => {
+    vi.spyOn(learningApi, 'learningPath').mockRejectedValue(
+      new ApiError('node_not_found', 404, 'node_not_found'),
+    );
+    const onPathLoaded = vi.fn();
+    render(
+      <LearningPathPanel
+        nodeId="missing"
+        onClose={() => {}}
+        onJumpToNode={() => {}}
+        onPathLoaded={onPathLoaded}
+      />,
+    );
+    await screen.findByTestId('learning-path-not-found');
+    expect(onPathLoaded).not.toHaveBeenCalled();
+  });
+
+  it('still calls onPathLoaded with [target] when path is empty', async () => {
+    vi.spyOn(learningApi, 'learningPath').mockResolvedValue({
+      target: { node_id: 'leaf', name: '入门' },
+      path: [],
+    });
+    const onPathLoaded = vi.fn();
+    render(
+      <LearningPathPanel
+        nodeId="leaf"
+        onClose={() => {}}
+        onJumpToNode={() => {}}
+        onPathLoaded={onPathLoaded}
+      />,
+    );
+    await screen.findByTestId('learning-path-empty');
+    expect(onPathLoaded).toHaveBeenCalledWith(['leaf']);
+  });
 });
