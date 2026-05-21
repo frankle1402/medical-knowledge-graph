@@ -100,7 +100,9 @@ export function GraphCanvas(props: CanvasProps) {
 
   const elements = useMemo<ElementDefinition[]>(() => {
     const els: ElementDefinition[] = [];
+    const nodeIds = new Set<string>();
     for (const n of nodes) {
+      nodeIds.add(n.node_id);
       const saved = positions?.get(n.node_id);
       const def: ElementDefinition = {
         group: 'nodes',
@@ -118,6 +120,8 @@ export function GraphCanvas(props: CanvasProps) {
     }
     for (const r of relations) {
       if (!r.relation_id) continue;
+      // Skip dangling edges — cytoscape throws if source or target node is missing.
+      if (!nodeIds.has(r.source_id) || !nodeIds.has(r.target_id)) continue;
       els.push({
         group: 'edges',
         data: {
