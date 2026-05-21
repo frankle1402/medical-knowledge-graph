@@ -320,7 +320,11 @@ export function GraphEditorPage() {
 
       <LearningPathPanel
         nodeId={learningPathNodeId}
-        onClose={() => setLearningPathNodeId(null)}
+        onClose={() => {
+          setLearningPathNodeId(null);
+          handleClearFocus();
+        }}
+        onPathLoaded={(ids) => setFocusedNodeIds(new Set(ids))}
         onJumpToNode={(nodeId) => {
           setLearningPathNodeId(null);
           handleEnterFocus(nodeId);
