@@ -31,6 +31,7 @@ import {
 import { renderPrompt } from './template.js';
 import type { VariableInput } from './variables.js';
 import type { RetryOptions } from '../../lib/llm/index.js';
+import { LLMParseError } from '../../lib/llm/index.js';
 
 /**
  * The minimal slice of NodeService that the orchestrator needs.
@@ -194,6 +195,11 @@ export class AIJobOrchestrator {
           system: input.template.system_prompt,
           user: prompt,
           responseFormat: 'json_object',
+          // Graph generation routinely emits 30–80 nodes + relations as JSON.
+          // OpenAI-compatible gateways often default max_tokens to 1024–4096
+          // and will silently truncate. Medical KG v2 prompts produce up to
+          // 15k+ chars (~6k tokens); 32768 covers Claude Opus/Sonnet 4.x limits.
+          maxTokens: 32768,
         },
         ...(this.retryOptions ? { retry: this.retryOptions } : {}),
       });
@@ -250,6 +256,14 @@ export class AIJobOrchestrator {
         output,
       };
     } catch (err) {
+      // Surface the raw LLM body when parse / schema validation fails so the
+      // failed job in the log table is debuggable. Without this, admins see
+      // only the zod error and have no way to view what the model actually
+      // returned (the most common failure mode is the model omitting a
+      // required field on a few of many nodes).
+      if (err instanceof LLMParseError && typeof err.raw === 'string' && err.raw.length > 0) {
+        raw = err.raw;
+      }
       const message = err instanceof Error ? err.message : String(err);
       try {
         await this.prisma.aiGenerationLog.update({

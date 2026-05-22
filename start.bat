@@ -7,7 +7,7 @@ rem  Medical Knowledge Graph - start.bat
 rem  1. check node / npm
 rem  2. check node_modules (auto npm install)
 rem  3. check backend/.env
-rem  4. probe Postgres 5432 / Neo4j 7687  (direct node, NOT npm)
+rem  4. probe Postgres 5432  (direct node, NOT npm)
 rem  5. ensure ports 3000 / 4000 free
 rem  6. launch "npm run dev" in a new window
 rem  7. wait for frontend, then open browser
@@ -53,14 +53,14 @@ if not exist "backend\.env" (
 )
 echo [start] backend\.env OK
 
-rem -- 4. external services (Postgres / Neo4j) ------------------
+rem -- 4. external services (Postgres) --------------------------
 rem  Call node directly. Going through `npm run check:env` invokes
 rem  npm.cmd, which corrupts this script's label table — any later
 rem  `call :LABEL` then fails with "batch label not found".
-echo [start] probing external services (Postgres 5432 / Neo4j 7687) ...
+echo [start] probing external services (Postgres 5432) ...
 node "infra\scripts\check-env.mjs"
 if errorlevel 1 (
-  echo [start][ERROR] external services not reachable. Start Postgres / Neo4j first.
+  echo [start][ERROR] Postgres not reachable. Start Postgres first.
   pause
   exit /b 1
 )

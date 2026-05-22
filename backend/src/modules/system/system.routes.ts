@@ -5,6 +5,12 @@ import { prisma } from '../../lib/prisma.js';
 import { chatCompletion } from '../../lib/llm/openai-client.js';
 import { LLMAuthError, LLMTransientError } from '../../lib/llm/errors.js';
 import { getMaskedLlmConfig, updateLlmConfig, getLlmConfig } from './llm-config.service.js';
+import {
+  getMaskedEmbeddingConfig,
+  updateEmbeddingConfig,
+  getEmbeddingConfig,
+} from './embedding-config.service.js';
+import { probeEmbedding } from '../../services/embedding/openai.js';
 
 export const systemRouter: Router = Router();
 
@@ -25,8 +31,7 @@ const LlmUpdateBody = z.object({
   base_url: z.string().url().or(z.literal('')).nullable().optional(),
   api_key: z.string().nullable().optional(),
   model: z.string().min(1).or(z.literal('')).nullable().optional(),
-  timeout_ms: z.number().int().min(1000).max(600_000).nullable().optional(),
-});
+  timeout_ms: z.number().int().min(1000).max(1_800_000).nullable().optional(),});
 
 systemRouter.put('/llm', requireAuth, requireRole('admin'), async (req, res, next) => {
   try {
@@ -106,6 +111,105 @@ systemRouter.post('/llm/test', requireAuth, requireRole('admin'), async (req, re
       latency_ms: Date.now() - startedAt,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+});
+
+// ---- Embedding config (admin) ----
+// Mirrors the LLM endpoints intentionally — same shape, separate row.
+// Why split: chat and embedding traffic often go to different providers
+// (e.g. local TEI / BGE for embeddings, OpenAI for chat) and admins want
+// to A/B without touching the chat config.
+
+systemRouter.get('/embedding', requireAuth, requireRole('admin'), async (_req, res, next) => {
+  try {
+    res.json(await getMaskedEmbeddingConfig());
+  } catch (e) {
+    next(e);
+  }
+});
+
+const EmbeddingUpdateBody = z.object({
+  base_url: z.string().url().or(z.literal('')).nullable().optional(),
+  api_key: z.string().nullable().optional(),
+  model: z.string().min(1).or(z.literal('')).nullable().optional(),
+  timeout_ms: z.number().int().min(1000).max(1_800_000).nullable().optional(),});
+
+systemRouter.put('/embedding', requireAuth, requireRole('admin'), async (req, res, next) => {
+  try {
+    const body = EmbeddingUpdateBody.parse(req.body);
+    const patch: Record<string, string | number | null> = {};
+    if (body.base_url !== undefined) patch.base_url = body.base_url === '' ? null : body.base_url;
+    if (body.model !== undefined) patch.model = body.model === '' ? null : body.model;
+    if (body.timeout_ms !== undefined) patch.timeout_ms = body.timeout_ms;
+    if (body.api_key !== undefined && body.api_key !== '') patch.api_key = body.api_key;
+    const userId = (req as { user?: { id?: string } }).user?.id ?? 'system';
+    await updateEmbeddingConfig(patch, userId);
+    res.json(await getMaskedEmbeddingConfig());
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/system/embedding/test — admin only.
+// Sends a tiny `embeddings.create` call. Returns the actual returned vector
+// dim so the admin can see whether the chosen model is compatible with the
+// pgvector column width (1536). Mismatched dim is reported as ok=false with
+// stage='dim_mismatch' rather than thrown — admins need to see the number
+// to decide whether a column-recreate migration is worth doing.
+const EmbeddingTestBody = z
+  .object({
+    base_url: z.string().url().optional(),
+    api_key: z.string().optional(),
+    model: z.string().min(1).optional(),
+    timeout_ms: z.number().int().min(1000).max(60_000).optional(),
+  })
+  .default({});
+
+const EXPECTED_EMBEDDING_DIM = 1536;
+
+systemRouter.post('/embedding/test', requireAuth, requireRole('admin'), async (req, res) => {
+  const body = EmbeddingTestBody.parse(req.body ?? {});
+  const saved = await getEmbeddingConfig();
+  const apiKey = body.api_key && body.api_key.length > 0 ? body.api_key : saved.api_key;
+
+  if (!apiKey) {
+    res.status(400).json({
+      ok: false,
+      stage: 'config',
+      error: 'API Key 未配置（请先填写并保存，或在测试时一并填入）',
+    });
+    return;
+  }
+
+  try {
+    const override: { base_url?: string; api_key?: string; model?: string } = {
+      api_key: apiKey,
+    };
+    if (body.base_url !== undefined) override.base_url = body.base_url;
+    if (body.model !== undefined) override.model = body.model;
+    const result = await probeEmbedding('connection probe', override);
+    const dimOk = result.dim === EXPECTED_EMBEDDING_DIM;
+    res.json({
+      ok: dimOk,
+      stage: dimOk ? null : 'dim_mismatch',
+      latency_ms: result.latency_ms,
+      model: result.model,
+      base_url: result.base_url,
+      returned_dim: result.dim,
+      expected_dim: EXPECTED_EMBEDDING_DIM,
+      ...(dimOk
+        ? {}
+        : {
+            error: `模型返回 ${result.dim} 维向量，但 pgvector 列固定为 ${EXPECTED_EMBEDDING_DIM} 维。要切换需要单独的迁移并全量 backfill。`,
+          }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    let stage: 'auth' | 'network' | 'parse' | 'unknown' = 'unknown';
+    if (/401|403|unauthorized|invalid api key/i.test(message)) stage = 'auth';
+    else if (/timeout|fetch|network|ECONN|ENOTFOUND/i.test(message)) stage = 'network';
+    else if (/JSON|HTML/i.test(message)) stage = 'parse';
+    res.status(200).json({ ok: false, stage, error: message });
   }
 });
 

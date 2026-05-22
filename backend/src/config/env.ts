@@ -26,7 +26,7 @@ const Schema = z
     LLM_BASE_URL: z.string().default('https://api.openai.com/v1'),
     LLM_API_KEY: z.string().default(''),
     LLM_MODEL: z.string().default('gpt-4o-mini'),
-    LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+    LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(1_800_000),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
       .default('info'),

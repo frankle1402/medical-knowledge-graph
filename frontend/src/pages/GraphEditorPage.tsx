@@ -570,8 +570,7 @@ function AIGenerateDialog({ open, graphId, onClose, onJobComplete }: AIGenerateD
           ) : null}
           {phase === 'polling' ? (
             <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 8 }} role="status">
-              生成中，请稍候… 已等待 {Math.floor(elapsedMs / 1000)}s（GPT-4o 处理章节图谱通常
-              60–180s，最长 5 分钟）
+              生成中，请稍候… 已等待 {Math.floor(elapsedMs / 1000)}s（每 30 秒轮询一次，最长等待 30 分钟）
             </div>
           ) : null}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -688,10 +687,9 @@ async function pollJob(
   jobId: string,
   options: { totalMs?: number; onTick?: (elapsedMs: number) => void } = {},
 ): Promise<AIJob> {
-  // GPT-4o on a full chapter (≈10–20 nodes + 30+ relations) often runs
-  // 60–180s; allow 5 minutes total. Poll every 1s for the first 30s
-  // (responsive on cache-hits / errors), then 3s thereafter (less load).
-  const totalMs = options.totalMs ?? 5 * 60 * 1000;
+  // LLM generation for a full chapter can take 5–20 min depending on model
+  // and provider load. Poll every 30s to avoid hammering the backend.
+  const totalMs = options.totalMs ?? 30 * 60 * 1000;
   const startedAt = Date.now();
   while (Date.now() - startedAt < totalMs) {
     const job = await aiApi.getJob(jobId);
@@ -700,10 +698,9 @@ async function pollJob(
     }
     const elapsed = Date.now() - startedAt;
     options.onTick?.(elapsed);
-    const interval = elapsed < 30_000 ? 1000 : 3000;
-    await new Promise((r) => setTimeout(r, interval));
+    await new Promise((r) => setTimeout(r, 30_000));
   }
-  throw new Error('生成超时（已等待 5 分钟仍未返回，请检查后端日志或 LLM 配置）');
+  throw new Error('生成超时（已等待 30 分钟仍未返回，请检查后端日志或 LLM 配置）');
 }
 
 const focusBarStyle: React.CSSProperties = {

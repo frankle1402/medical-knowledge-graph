@@ -11,6 +11,10 @@ export {
   type LlmConfigUpdate,
   type LlmTestResult,
   type LlmTestPayload,
+  type MaskedEmbeddingConfig,
+  type EmbeddingConfigUpdate,
+  type EmbeddingTestPayload,
+  type EmbeddingTestResult,
 } from './system';
 export {
   searchApi,

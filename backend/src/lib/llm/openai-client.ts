@@ -35,6 +35,14 @@ export interface ChatCompletionOptions {
   apiKey?: string;
   /** Hard timeout in ms. Default LLM_TIMEOUT_MS env. */
   timeoutMs?: number;
+  /**
+   * Cap on output tokens. Default `undefined` (let the upstream pick), but for
+   * structured-output prompts (graph generation) callers should pass a high
+   * value (e.g. 8192) since OpenAI-compatible gateways sometimes default to
+   * 1024–4096 and silently truncate the JSON, producing schema validation
+   * errors that look like the model misbehaved.
+   */
+  maxTokens?: number;
   /** AbortSignal from the caller (composed with timeoutMs). */
   signal?: AbortSignal;
 }
@@ -46,7 +54,8 @@ interface ChatCompletionResponse {
   }>;
 }
 
-const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+// 520–527 are Cloudflare-originated "origin unreachable" errors — treat as transient.
+const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527]);
 
 function buildMessages(opts: ChatCompletionOptions): ChatMessage[] {
   if (opts.messages && opts.messages.length > 0) {
@@ -74,6 +83,9 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<strin
     messages: buildMessages(opts),
     temperature: opts.temperature ?? 0.2,
   };
+  if (opts.maxTokens !== undefined) {
+    body.max_tokens = opts.maxTokens;
+  }
   if (opts.responseFormat === 'json_object') {
     body.response_format = { type: 'json_object' };
   }
@@ -168,6 +180,16 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<strin
   const content = data.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || content.length === 0) {
     throw new LLMError('LLM response missing choices[0].message.content');
+  }
+  // OpenAI-compatible APIs report finish_reason="length" when the response
+  // hit max_tokens. Surface that explicitly — otherwise the truncated JSON
+  // makes its way to the parser and the user sees a confusing zod error
+  // (e.g. "nodes.16.name: Required") instead of "你的输出超出 token 上限".
+  const finish = data.choices?.[0]?.finish_reason;
+  if (finish === 'length') {
+    throw new LLMError(
+      `LLM 输出被 token 上限截断（finish_reason=length）。请把模板里 max_tokens 调大，或减少一次请求里的章节内容。当前 max_tokens=${opts.maxTokens ?? '(默认)'}，输出长度=${content.length} 字符。`,
+    );
   }
   return content;
 }

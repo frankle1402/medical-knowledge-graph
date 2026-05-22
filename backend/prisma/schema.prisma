@@ -82,6 +82,23 @@ model LlmConfig {
   @@map("llm_config")
 }
 
+// Runtime-mutable embedding configuration. Singleton row keyed by id="default".
+// Separate from LlmConfig because embedding traffic often goes to a different
+// provider (e.g. local TEI, BGE, Jina) than chat completions, and admins may
+// want to A/B different embedding models without touching the chat endpoint.
+// Falls back to LLM env defaults when unset (same key works on OpenAI).
+model EmbeddingConfig {
+  id         String   @id @default("default")
+  base_url   String?
+  api_key    String?
+  model      String?
+  timeout_ms Int?
+  updated_at DateTime @updatedAt
+  updated_by String?
+
+  @@map("embedding_config")
+}
+
 model Graph {
   graph_id      String   @id @db.VarChar(50)
   graph_name    String   @db.VarChar(100)

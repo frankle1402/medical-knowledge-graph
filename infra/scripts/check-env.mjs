@@ -2,10 +2,7 @@
 import net from 'node:net';
 import 'dotenv/config';
 
-const checks = [
-  { name: 'PostgreSQL', host: 'localhost', port: 5432 },
-  { name: 'Neo4j Bolt', host: 'localhost', port: 7687 },
-];
+const checks = [{ name: 'PostgreSQL', host: 'localhost', port: 5432 }];
 
 function probe({ host, port }) {
   return new Promise((resolve) => {
