@@ -5,11 +5,11 @@ import {
   NodeUpdateInput,
   NodeType,
   NodeStatus,
+  generateNodeId,
 } from '@mkg/shared';
 import { runQuery } from '../../lib/neo4j.js';
 import { prisma } from '../../lib/prisma.js';
 import { getStorageBackend } from '../../lib/storage-backend.js';
-import { generateNodeId } from '../../services/neo4j/id.js';
 
 /**
  * NodeListQuery — query string contract for `GET /api/graphs/:id/nodes`.

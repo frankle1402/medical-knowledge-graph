@@ -1,9 +1,8 @@
 import { z } from 'zod';
-import { GraphType } from '@mkg/shared';
+import { GraphType, generateGraphId } from '@mkg/shared';
 import { runQuery } from '../../lib/neo4j.js';
 import { prisma } from '../../lib/prisma.js';
 import { getStorageBackend } from '../../lib/storage-backend.js';
-import { generateGraphId } from '../../services/neo4j/id.js';
 
 /**
  * Server-side input schema for creating a graph.

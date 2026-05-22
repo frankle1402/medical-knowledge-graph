@@ -9,12 +9,9 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:neo4j": "node -e \"process.env.STORAGE_BACKEND='neo4j';require('child_process').spawnSync(process.platform==='win32'?'npx.cmd':'npx',['vitest','run'],{stdio:'inherit',env:process.env})\"",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
-    "neo4j:init": "tsx src/scripts/neo4j-init.ts",
-    "smoke:graph": "tsx src/scripts/smoke-graph.ts",
     "migrate:from-neo4j": "tsx src/scripts/migrate-from-neo4j.ts",
     "backfill:embeddings": "tsx src/scripts/backfill-embeddings.ts"
   },
