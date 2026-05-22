@@ -1,5 +1,7 @@
 # 医学教材知识图谱平台（MVP）
 
+医学知识图谱AI构建与查询平台
+
 天堰医学教育知识图谱平台。详细设计见 [docs/plans/2026-05-17-medical-knowledge-graph-design.md](docs/plans/2026-05-17-medical-knowledge-graph-design.md)。
 
 ## 快速开始（本地原生，无 Docker）
